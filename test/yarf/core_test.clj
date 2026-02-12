@@ -117,6 +117,64 @@
       (is (transparent? t))
       (is (= 10 (:damage t))))))
 
+;; Type definition tests
+
+(deftest define-tile-type-test
+  (testing "can define a tile type with description and lore"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :wall
+                         {:description "A solid stone wall"
+                          :lore "These ancient walls have stood for centuries."}))]
+      (is (= "A solid stone wall" (get-type-property registry :tile :wall :description)))
+      (is (= "These ancient walls have stood for centuries." (get-type-property registry :tile :wall :lore)))))
+  (testing "tile type can have custom properties"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :lava
+                         {:description "Molten rock"
+                          :damage-per-turn 5
+                          :element :fire}))]
+      (is (= 5 (get-type-property registry :tile :lava :damage-per-turn)))
+      (is (= :fire (get-type-property registry :tile :lava :element))))))
+
+(deftest define-entity-type-test
+  (testing "can define an entity type with description and lore"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin
+                         {:description "A small, green-skinned creature"
+                          :lore "Goblins are known for their cunning and cowardice."}))]
+      (is (= "A small, green-skinned creature" (get-type-property registry :entity :goblin :description)))
+      (is (= "Goblins are known for their cunning and cowardice." (get-type-property registry :entity :goblin :lore)))))
+  (testing "entity type can have custom properties"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :dragon
+                         {:description "A fearsome winged beast"
+                          :base-hp 100
+                          :species :reptile
+                          :family :draconic}))]
+      (is (= 100 (get-type-property registry :entity :dragon :base-hp)))
+      (is (= :reptile (get-type-property registry :entity :dragon :species)))
+      (is (= :draconic (get-type-property registry :entity :dragon :family))))))
+
+(deftest get-instance-type-test
+  (testing "can get type properties from a tile instance"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor
+                         {:description "A stone floor"
+                          :lore "Worn smooth by countless footsteps."}))
+          tile floor-tile]
+      (is (= "A stone floor" (get-instance-type-property registry tile :description)))))
+  (testing "can get type properties from an entity instance"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :player
+                         {:description "The hero of our story"
+                          :lore "A brave adventurer seeking fortune and glory."}))
+          player (create-player 5 5)]
+      (is (= "The hero of our story" (get-instance-type-property registry player :description)))))
+  (testing "returns nil for undefined type properties"
+    (let [registry (create-type-registry)
+          player (create-player 5 5)]
+      (is (nil? (get-instance-type-property registry player :description))))))
+
 ;; Map generation tests
 
 (deftest fill-rect-test

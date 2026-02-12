@@ -1,5 +1,42 @@
 (ns yarf.core)
 
+;; Type registry
+;; Types define shared immutable properties for entities and tiles (description, lore, etc.)
+
+(defn create-type-registry
+  "Creates an empty type registry for storing entity and tile type definitions."
+  []
+  {:entity {}
+   :tile {}})
+
+(defn define-tile-type
+  "Defines a tile type with the given properties.
+   Properties typically include :description, :lore, and game-specific attributes."
+  [registry type-key properties]
+  (assoc-in registry [:tile type-key] properties))
+
+(defn define-entity-type
+  "Defines an entity type with the given properties.
+   Properties typically include :description, :lore, and game-specific attributes."
+  [registry type-key properties]
+  (assoc-in registry [:entity type-key] properties))
+
+(defn get-type-property
+  "Gets a property from a type definition.
+   category is :entity or :tile, type-key is the type identifier."
+  [registry category type-key property]
+  (get-in registry [category type-key property]))
+
+(defn get-instance-type-property
+  "Gets a type property from an entity or tile instance.
+   Looks up the instance's :type in the registry and returns the property."
+  [registry instance property]
+  (let [type-key (:type instance)
+        ;; Try entity first, then tile
+        entity-prop (get-in registry [:entity type-key property])
+        tile-prop (get-in registry [:tile type-key property])]
+    (or entity-prop tile-prop)))
+
 ;; Tile properties and constructors
 
 (defn make-tile
