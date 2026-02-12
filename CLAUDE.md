@@ -15,6 +15,7 @@ This is a Leiningen-based Clojure project.
 ```bash
 lein repl          # Start REPL (enters yarf.core namespace)
 lein test          # Run all tests
+lein run           # Run demo game
 lein uberjar       # Build executable JAR
 ```
 
@@ -98,6 +99,14 @@ Entities are game objects (players, monsters, items) with position and display p
 - `create-screen`, `start-screen`, `stop-screen`
 - `render-map`, `render-entities`, `render-char`
 - `get-key`, `get-key-non-blocking`
+
+### Demo (`yarf.demo`)
+
+Simple game loop demonstrating the framework. Run with `lein run`.
+
+- Arrow keys to move player, `q` or ESC to quit
+- Player and two wandering goblins
+- Viewport follows player
 
 ## Development Notes
 
