@@ -33,9 +33,19 @@
   (:color tile :white))
 
 (defn walkable?
-  "Returns true if the tile can be walked through."
-  [tile]
-  (:walkable tile false))
+  "Returns true if the mover can walk through the tile.
+   Checks the tile's :walkable property first, then the mover's special abilities.
+   For example, a mover with :can-swim can walk on water tiles."
+  [mover tile]
+  (let [base-walkable (:walkable tile false)]
+    (if base-walkable
+      true
+      ;; Check for special abilities that might allow movement
+      (cond
+        ;; Entities with :can-swim can traverse water
+        (and (:can-swim mover) (= :water (:type tile))) true
+        ;; Default to not walkable
+        :else false))))
 
 (defn transparent?
   "Returns true if the tile can be seen through."
@@ -260,18 +270,28 @@
    \b :move-down-left
    \n :move-down-right})
 
+(defn try-move
+  "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable."
+  [game-map entity dx dy]
+  (let [new-x (+ (entity-x entity) dx)
+        new-y (+ (entity-y entity) dy)]
+    (if (and (in-bounds? game-map new-x new-y)
+             (walkable? entity (get-tile game-map new-x new-y)))
+      (update-entity game-map entity move-entity-by dx dy)
+      game-map)))
+
 (defn execute-action
   "Executes a player action, returning the updated game map."
   [action entity game-map]
   (case action
-    :move-up (update-entity game-map entity move-entity-by 0 -1)
-    :move-down (update-entity game-map entity move-entity-by 0 1)
-    :move-left (update-entity game-map entity move-entity-by -1 0)
-    :move-right (update-entity game-map entity move-entity-by 1 0)
-    :move-up-left (update-entity game-map entity move-entity-by -1 -1)
-    :move-up-right (update-entity game-map entity move-entity-by 1 -1)
-    :move-down-left (update-entity game-map entity move-entity-by -1 1)
-    :move-down-right (update-entity game-map entity move-entity-by 1 1)
+    :move-up (try-move game-map entity 0 -1)
+    :move-down (try-move game-map entity 0 1)
+    :move-left (try-move game-map entity -1 0)
+    :move-right (try-move game-map entity 1 0)
+    :move-up-left (try-move game-map entity -1 -1)
+    :move-up-right (try-move game-map entity 1 -1)
+    :move-down-left (try-move game-map entity -1 1)
+    :move-down-right (try-move game-map entity 1 1)
     :quit (assoc game-map :quit true)
     game-map))
 

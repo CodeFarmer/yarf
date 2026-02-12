@@ -83,11 +83,20 @@
 
 (deftest tile-walkable-test
   (testing "walkable? returns correct values for tile types"
-    (is (walkable? floor-tile))
-    (is (not (walkable? wall-tile)))
-    (is (not (walkable? door-closed-tile)))
-    (is (walkable? door-open-tile))
-    (is (not (walkable? water-tile)))))
+    (let [e (create-entity :player \@ :white 5 5)]
+      (is (walkable? e floor-tile))
+      (is (not (walkable? e wall-tile)))
+      (is (not (walkable? e door-closed-tile)))
+      (is (walkable? e door-open-tile))
+      (is (not (walkable? e water-tile)))))
+  (testing "entities with :can-swim can walk on water"
+    (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})
+          player (create-entity :player \@ :white 5 5)]
+      (is (walkable? fish water-tile))
+      (is (not (walkable? player water-tile)))))
+  (testing "special abilities don't override unwalkable solid tiles"
+    (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})]
+      (is (not (walkable? fish wall-tile))))))
 
 (deftest tile-transparent-test
   (testing "transparent? returns correct values for tile types"
@@ -99,11 +108,12 @@
 
 (deftest make-tile-test
   (testing "make-tile creates tile with specified properties"
-    (let [t (make-tile :lava \* :red {:walkable false :transparent true :damage 10})]
+    (let [t (make-tile :lava \* :red {:walkable false :transparent true :damage 10})
+          e (create-entity :player \@ :white 5 5)]
       (is (= :lava (:type t)))
       (is (= \* (tile-char t)))
       (is (= :red (tile-color t)))
-      (is (not (walkable? t)))
+      (is (not (walkable? e t)))
       (is (transparent? t))
       (is (= 10 (:damage t))))))
 
@@ -180,6 +190,92 @@
                 (move-entity-by 2 -1))]
       (is (= 7 (entity-x e)))
       (is (= 4 (entity-y e))))))
+
+(deftest boundary-check-test
+  (testing "entities cannot move off left edge"
+    (let [e (create-entity :player \@ :white 0 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-left e m)]
+      (is (= 0 (entity-x (first (get-entities m2)))))))
+  (testing "entities cannot move off right edge"
+    (let [e (create-entity :player \@ :white 9 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-right e m)]
+      (is (= 9 (entity-x (first (get-entities m2)))))))
+  (testing "entities cannot move off top edge"
+    (let [e (create-entity :player \@ :white 5 0)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-up e m)]
+      (is (= 0 (entity-y (first (get-entities m2)))))))
+  (testing "entities cannot move off bottom edge"
+    (let [e (create-entity :player \@ :white 5 9)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-down e m)]
+      (is (= 9 (entity-y (first (get-entities m2)))))))
+  (testing "diagonal movement respects boundaries"
+    (let [e (create-entity :player \@ :white 0 0)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-up-left e m)]
+      (is (= 0 (entity-x (first (get-entities m2)))))
+      (is (= 0 (entity-y (first (get-entities m2))))))))
+
+(deftest solid-tile-collision-test
+  (testing "entities cannot move into wall tiles"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 wall-tile)
+                (add-entity e))
+          m2 (execute-action :move-up e m)]
+      (is (= 5 (entity-x (first (get-entities m2)))))
+      (is (= 5 (entity-y (first (get-entities m2)))))))
+  (testing "entities can move into floor tiles"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (execute-action :move-up e m)]
+      (is (= 5 (entity-x (first (get-entities m2)))))
+      (is (= 4 (entity-y (first (get-entities m2)))))))
+  (testing "entities cannot move diagonally into walls"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 4 4 wall-tile)
+                (add-entity e))
+          m2 (execute-action :move-up-left e m)]
+      (is (= 5 (entity-x (first (get-entities m2)))))
+      (is (= 5 (entity-y (first (get-entities m2)))))))
+  (testing "entities can move into open doors"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 door-open-tile)
+                (add-entity e))
+          m2 (execute-action :move-up e m)]
+      (is (= 4 (entity-y (first (get-entities m2)))))))
+  (testing "entities cannot move into closed doors"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 door-closed-tile)
+                (add-entity e))
+          m2 (execute-action :move-up e m)]
+      (is (= 5 (entity-y (first (get-entities m2)))))))
+  (testing "entities with :can-swim can move into water"
+    (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 water-tile)
+                (add-entity fish))
+          m2 (try-move m fish 0 -1)]
+      (is (= 4 (entity-y (first (get-entities m2)))))))
+  (testing "entities without :can-swim cannot move into water"
+    (let [player (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 water-tile)
+                (add-entity player))
+          m2 (try-move m player 0 -1)]
+      (is (= 5 (entity-y (first (get-entities m2))))))))
 
 (deftest map-entities-test
   (testing "new map has no entities"

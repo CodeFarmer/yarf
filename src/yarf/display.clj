@@ -174,8 +174,12 @@
 ;; Player with display
 
 (defn create-player-with-display
-  "Creates a player entity that gets input from the given display."
-  [x y display]
-  (core/create-entity :player \@ :yellow x y
-                      {:act (core/make-player-act #(get-input display))
-                       :display display}))
+  "Creates a player entity that gets input from the given display.
+   Optional key-map translates input keys to actions."
+  ([x y display]
+   (create-player-with-display x y display core/default-key-map))
+  ([x y display key-map]
+   (core/create-entity :player \@ :yellow x y
+                       {:act (core/make-player-act #(get-input display) key-map)
+                        :display display
+                        :key-map key-map})))
