@@ -42,6 +42,32 @@
     (is (= :door-open (:type door-open-tile)))
     (is (= :water (:type water-tile)))))
 
+(deftest tile-char-test
+  (testing "predefined tiles have display characters"
+    (is (= \. (tile-char floor-tile)))
+    (is (= \# (tile-char wall-tile)))
+    (is (= \+ (tile-char door-closed-tile)))
+    (is (= \/ (tile-char door-open-tile)))
+    (is (= \~ (tile-char water-tile))))
+  (testing "custom tiles can specify display character"
+    (let [t (make-tile :lava \* :red {:walkable false})]
+      (is (= \* (tile-char t)))))
+  (testing "returns ? for tiles without char"
+    (is (= \? (tile-char {:type :unknown})))))
+
+(deftest tile-color-test
+  (testing "predefined tiles have display colors"
+    (is (= :white (tile-color floor-tile)))
+    (is (= :white (tile-color wall-tile)))
+    (is (= :yellow (tile-color door-closed-tile)))
+    (is (= :yellow (tile-color door-open-tile)))
+    (is (= :blue (tile-color water-tile))))
+  (testing "custom tiles can specify display color"
+    (let [t (make-tile :lava \* :red {:walkable false})]
+      (is (= :red (tile-color t)))))
+  (testing "returns :white for tiles without color"
+    (is (= :white (tile-color {:type :unknown})))))
+
 (deftest tile-walkable-test
   (testing "walkable? returns correct values for tile types"
     (is (walkable? floor-tile))
@@ -60,8 +86,10 @@
 
 (deftest make-tile-test
   (testing "make-tile creates tile with specified properties"
-    (let [t (make-tile :lava {:walkable false :transparent true :damage 10})]
+    (let [t (make-tile :lava \* :red {:walkable false :transparent true :damage 10})]
       (is (= :lava (:type t)))
+      (is (= \* (tile-char t)))
+      (is (= :red (tile-color t)))
       (is (not (walkable? t)))
       (is (transparent? t))
       (is (= 10 (:damage t))))))

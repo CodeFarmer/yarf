@@ -3,24 +3,34 @@
 ;; Tile properties and constructors
 
 (defn make-tile
-  "Creates a tile with the given type and properties."
-  [tile-type properties]
-  (merge {:type tile-type} properties))
+  "Creates a tile with the given type, display character, color, and properties."
+  [tile-type char color properties]
+  (merge {:type tile-type :char char :color color} properties))
 
 (def floor-tile
-  (make-tile :floor {:walkable true :transparent true}))
+  (make-tile :floor \. :white {:walkable true :transparent true}))
 
 (def wall-tile
-  (make-tile :wall {:walkable false :transparent false}))
+  (make-tile :wall \# :white {:walkable false :transparent false}))
 
 (def door-closed-tile
-  (make-tile :door-closed {:walkable false :transparent false}))
+  (make-tile :door-closed \+ :yellow {:walkable false :transparent false}))
 
 (def door-open-tile
-  (make-tile :door-open {:walkable true :transparent true}))
+  (make-tile :door-open \/ :yellow {:walkable true :transparent true}))
 
 (def water-tile
-  (make-tile :water {:walkable false :transparent true}))
+  (make-tile :water \~ :blue {:walkable false :transparent true}))
+
+(defn tile-char
+  "Returns the display character for a tile."
+  [tile]
+  (:char tile \?))
+
+(defn tile-color
+  "Returns the display color for a tile."
+  [tile]
+  (:color tile :white))
 
 (defn walkable?
   "Returns true if the tile can be walked through."
