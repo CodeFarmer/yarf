@@ -98,15 +98,28 @@ Entities are game objects (players, monsters, items) with position and display p
 - After acting, `next-action` is incremented by `delay`
 
 **Key mappings (`yarf.core`):**
-- `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal
-- `execute-action [action entity map]` - executes `:move-up`, `:move-down`, etc., `:quit`
+- `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal, `x` look
+- `execute-action [action entity map]` - executes `:move-*`, `:look`, `:quit`
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
 - `try-move [map entity dx dy]` - attempts move, checks bounds and walkability
+- Sets `:blocked true` on map if movement was blocked by solid tile
 - Entities cannot move off map edges or into unwalkable tiles
 - Entity abilities affect terrain interaction:
   - `:can-swim true` - entity can traverse water tiles
+
+**Looking at objects (`yarf.core`):**
+- `get-name [registry instance]` - returns name (instance, type, or type-key as fallback)
+- `get-description [registry instance]` - returns description from instance or type
+- `look-at [registry map x y]` - returns `{:name :description :category :target}` for position
+
+**Map flags:**
+- `:blocked` - set by `try-move` when movement fails
+- `:message` - displayed in message bar by game loop
+- `:no-time` - action doesn't increment `next-action`
+- `:look-mode` - signals entry to look mode
+- `:quit` - signals game should exit
 
 ### Map Generation (`yarf.core`)
 
@@ -122,6 +135,7 @@ Entities are game objects (players, monsters, items) with position and display p
 - `render-tile [this x y tile]` / `render-entity [this x y entity]`
 - `clear-screen` / `refresh-screen` - screen management
 - `start-display` / `stop-display` - lifecycle
+- `display-message [this message]` - show message in message bar
 
 **CursesDisplay** - lanterna implementation:
 - `create-curses-display [viewport]` or `[viewport screen-type]`
@@ -147,6 +161,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - Player and two wandering goblins
 - Viewport follows player
+- Shows "bump!" in message bar when walking into walls
+- Custom player via `make-demo-player-act` (converts `:blocked` to `:message`)
 
 ## Development Notes
 
