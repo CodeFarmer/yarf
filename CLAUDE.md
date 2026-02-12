@@ -35,8 +35,19 @@ Types define shared immutable properties (description, lore, etc.) for entities 
 - `create-type-registry` - creates empty registry
 - `define-entity-type [registry type-key properties]` - register entity type
 - `define-tile-type [registry type-key properties]` - register tile type
-- `get-type-property [registry category type-key property]` - get property (category is `:entity` or `:tile`)
-- `get-instance-type-property [registry instance property]` - get property from entity/tile instance
+- `get-type-property [registry category type-key property]` - get property (follows inheritance)
+- `get-instance-type-property [registry instance property]` - get type property from instance
+- `get-property [registry instance property]` - instance value, falling back to type
+
+**Type inheritance:** Types can have `:parent` for single inheritance. Property lookup walks up the chain until found.
+
+```clojure
+(-> (create-type-registry)
+    (define-entity-type :creature {:mortal true})
+    (define-entity-type :humanoid {:parent :creature :has-hands true})
+    (define-entity-type :goblin {:parent :humanoid :base-hp 5}))
+;; goblin inherits :mortal and :has-hands from ancestors
+```
 
 ### Tile Maps (`yarf.core`)
 
