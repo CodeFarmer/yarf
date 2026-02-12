@@ -33,3 +33,35 @@
       (is (not (in-bounds? m 0 -1)))
       (is (not (in-bounds? m 10 0)))
       (is (not (in-bounds? m 0 10))))))
+
+(deftest tile-types-test
+  (testing "predefined tile types have correct properties"
+    (is (= :floor (:type floor-tile)))
+    (is (= :wall (:type wall-tile)))
+    (is (= :door-closed (:type door-closed-tile)))
+    (is (= :door-open (:type door-open-tile)))
+    (is (= :water (:type water-tile)))))
+
+(deftest tile-walkable-test
+  (testing "walkable? returns correct values for tile types"
+    (is (walkable? floor-tile))
+    (is (not (walkable? wall-tile)))
+    (is (not (walkable? door-closed-tile)))
+    (is (walkable? door-open-tile))
+    (is (not (walkable? water-tile)))))
+
+(deftest tile-transparent-test
+  (testing "transparent? returns correct values for tile types"
+    (is (transparent? floor-tile))
+    (is (not (transparent? wall-tile)))
+    (is (not (transparent? door-closed-tile)))
+    (is (transparent? door-open-tile))
+    (is (transparent? water-tile))))
+
+(deftest make-tile-test
+  (testing "make-tile creates tile with specified properties"
+    (let [t (make-tile :lava {:walkable false :transparent true :damage 10})]
+      (is (= :lava (:type t)))
+      (is (not (walkable? t)))
+      (is (transparent? t))
+      (is (= 10 (:damage t))))))
