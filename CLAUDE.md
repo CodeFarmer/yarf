@@ -66,7 +66,12 @@ Entities are game objects (players, monsters, items) with position and display p
 - `can-act? [entity]` - true if entity has `:act` function
 - `act-entity [map entity]` - calls entity's act fn `(fn [entity map] -> map)`
 - `process-actors [map]` - processes all entities with act functions
-- `make-player-act [input-fn]` - creates act fn that gets input from input-fn
+- `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn
+
+**Key mappings (`yarf.core`):**
+- `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal
+- `execute-action [action entity map]` - executes `:move-up`, `:move-down`, etc., `:quit`
+- Custom key maps: `{\w :move-up \s :move-down ...}`
 
 ### Map Generation (`yarf.core`)
 
@@ -88,7 +93,7 @@ Entities are game objects (players, monsters, items) with position and display p
 - `render-map-to-display` / `render-entities-to-display` - render using protocol
 
 **Player with display:**
-- `create-player-with-display [x y display]` - player that gets input from display
+- `create-player-with-display [x y display]` or `[x y display key-map]`
 
 **Viewport:**
 - `create-viewport [w h]` - create viewport
@@ -104,7 +109,7 @@ Entities are game objects (players, monsters, items) with position and display p
 
 Simple game loop demonstrating the framework. Run with `lein run`.
 
-- Arrow keys to move player, `q` or ESC to quit
+- `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - Player and two wandering goblins
 - Viewport follows player
 
