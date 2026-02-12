@@ -13,7 +13,7 @@
   (refresh-screen [this] "Refreshes the display to show rendered content.")
   (start-display [this] "Starts the display.")
   (stop-display [this] "Stops the display and cleans up.")
-  (display-message [this message] "Displays a message in the status bar."))
+  (display-message [this message] "Displays a message in the message bar."))
 
 ;; Viewport management
 

@@ -76,7 +76,7 @@
       (is (= [5 3] (screen-to-world vp 0 0))))))
 
 (deftest display-message-test
-  (testing "display-message shows message in status bar"
+  (testing "display-message shows message in message bar"
     (let [d (make-mock-display)]
       (display-message d "Hello, world!")
       (is (= "Hello, world!" @(:message-atom d))))))
