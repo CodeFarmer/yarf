@@ -57,6 +57,10 @@ Entities are game objects (players, monsters, items) with position and display p
 - `get-entities` / `get-entities-at [map x y]` - query entities
 - `update-entity [map entity f & args]` - update entity in place
 
+**Player:**
+- `create-player [x y]` - creates player (`@`, yellow)
+- `get-player [map]` - retrieves player from map
+
 ### Map Generation (`yarf.core`)
 
 - `fill-rect [map x y w h tile]` - fill rectangular region
