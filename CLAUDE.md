@@ -69,10 +69,12 @@ Tiles are maps with `:type`, `:char`, `:color`, and properties (`:walkable`, `:t
 
 ### Entities (`yarf.core`)
 
-Entities are game objects (players, monsters, items) with position and display properties.
+Entities are game objects (players, monsters, items) with position and display properties. Position is stored as `:pos [x y]`.
 
 - `create-entity [type char color x y]` or `[type char color x y props]`
-- `entity-type`, `entity-char`, `entity-color`, `entity-x`, `entity-y` - accessors
+- `entity-type`, `entity-char`, `entity-color` - accessors
+- `entity-pos` - returns `[x y]` vector
+- `entity-x`, `entity-y` - individual coordinate accessors
 - `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - movement
 
 **Map entity management:**

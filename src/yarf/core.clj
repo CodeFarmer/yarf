@@ -54,8 +54,8 @@
     (cond
       (get-in registry [:entity type-key]) :entity
       (get-in registry [:tile type-key]) :tile
-      ;; Default guess based on presence of position (entities have x/y)
-      (contains? instance :x) :entity
+      ;; Default guess based on presence of position (entities have :pos)
+      (contains? instance :pos) :entity
       :else :tile)))
 
 (defn get-property
@@ -225,11 +225,11 @@
 
 (defn create-entity
   "Creates an entity with type, display char, color, and position.
-   Optional properties map can be provided."
+   Position is stored as :pos [x y]. Optional properties map can be provided."
   ([entity-type char color x y]
    (create-entity entity-type char color x y {}))
   ([entity-type char color x y properties]
-   (merge {:type entity-type :char char :color color :x x :y y} properties)))
+   (merge {:type entity-type :char char :color color :pos [x y]} properties)))
 
 (defn entity-type
   "Returns the type of an entity."
@@ -246,15 +246,20 @@
   [entity]
   (:color entity :white))
 
+(defn entity-pos
+  "Returns the position of an entity as [x y]."
+  [entity]
+  (:pos entity))
+
 (defn entity-x
   "Returns the x coordinate of an entity."
   [entity]
-  (:x entity))
+  (first (:pos entity)))
 
 (defn entity-y
   "Returns the y coordinate of an entity."
   [entity]
-  (:y entity))
+  (second (:pos entity)))
 
 (defn entity-delay
   "Returns the delay (ticks between actions) for an entity. Defaults to 10."
@@ -269,7 +274,7 @@
 (defn move-entity
   "Moves an entity to a new position."
   [entity x y]
-  (assoc entity :x x :y y))
+  (assoc entity :pos [x y]))
 
 (defn move-entity-by
   "Moves an entity by a relative offset."
