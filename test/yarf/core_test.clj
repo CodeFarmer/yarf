@@ -208,3 +208,30 @@
       (is (= 10 (entity-x updated)))
       (is (= 10 (entity-y updated)))
       (is (empty? (get-entities-at m2 5 5))))))
+
+;; Player entity tests
+
+(deftest create-player-test
+  (testing "creates player entity with standard properties"
+    (let [p (create-player 5 10)]
+      (is (= :player (entity-type p)))
+      (is (= \@ (entity-char p)))
+      (is (= :yellow (entity-color p)))
+      (is (= 5 (entity-x p)))
+      (is (= 10 (entity-y p)))))
+  (testing "player can be added to map"
+    (let [p (create-player 3 3)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))]
+      (is (= 1 (count (get-entities m))))
+      (is (= p (first (get-entities-at m 3 3)))))))
+
+(deftest get-player-test
+  (testing "retrieves player from map"
+    (let [p (create-player 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))]
+      (is (= p (get-player m)))))
+  (testing "returns nil if no player in map"
+    (let [m (create-tile-map 10 10)]
+      (is (nil? (get-player m))))))

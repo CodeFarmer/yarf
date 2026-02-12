@@ -206,3 +206,15 @@
     (-> tile-map
         (remove-entity entity)
         (add-entity updated))))
+
+;; Player
+
+(defn create-player
+  "Creates a player entity at the given position."
+  [x y]
+  (create-entity :player \@ :yellow x y))
+
+(defn get-player
+  "Returns the player entity from the map, or nil if not found."
+  [tile-map]
+  (first (filter #(= :player (entity-type %)) (get-entities tile-map))))
