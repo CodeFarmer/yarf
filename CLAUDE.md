@@ -58,8 +58,14 @@ Entities are game objects (players, monsters, items) with position and display p
 - `update-entity [map entity f & args]` - update entity in place
 
 **Player:**
-- `create-player [x y]` - creates player (`@`, yellow)
+- `create-player [x y]` - creates player (`@`, yellow, no input)
 - `get-player [map]` - retrieves player from map
+
+**Entity actions:**
+- `can-act? [entity]` - true if entity has `:act` function
+- `act-entity [map entity]` - calls entity's act fn `(fn [entity map] -> map)`
+- `process-actors [map]` - processes all entities with act functions
+- `make-player-act [input-fn]` - creates act fn that gets input from input-fn
 
 ### Map Generation (`yarf.core`)
 
@@ -70,20 +76,28 @@ Entities are game objects (players, monsters, items) with position and display p
 
 ### Display (`yarf.display`)
 
-Curses display using clojure-lanterna.
+**Display protocol:**
+- `get-input` - get input (blocking)
+- `render-tile [this x y tile]` / `render-entity [this x y entity]`
+- `clear-screen` / `refresh-screen` - screen management
+- `start-display` / `stop-display` - lifecycle
+
+**CursesDisplay** - lanterna implementation:
+- `create-curses-display [viewport]` or `[viewport screen-type]`
+- `render-map-to-display` / `render-entities-to-display` - render using protocol
+
+**Player with display:**
+- `create-player-with-display [x y display]` - player that gets input from display
 
 **Viewport:**
 - `create-viewport [w h]` - create viewport
 - `center-viewport-on` / `clamp-to-map` - position viewport
 - `world-to-screen` / `screen-to-world` - coordinate conversion
 
-**Screen:**
-- `create-screen` - create lanterna screen (`:text`, `:swing`, `:auto`)
-- `start-screen` / `stop-screen` - lifecycle
-- `render-map [screen map viewport]` - draw visible map with colors
-- `render-entities [screen map viewport]` - draw visible entities
-- `render-char [screen x y ch]` or `[screen x y ch color]` - draw character
-- `get-key` / `get-key-non-blocking` - input handling
+**Legacy screen functions** (low-level lanterna access):
+- `create-screen`, `start-screen`, `stop-screen`
+- `render-map`, `render-entities`, `render-char`
+- `get-key`, `get-key-non-blocking`
 
 ## Development Notes
 
