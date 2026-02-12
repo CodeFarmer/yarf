@@ -43,7 +43,8 @@ Tiles are maps with `:type`, `:char`, `:color`, and properties (`:walkable`, `:t
 - `make-tile [type char color properties]` - create custom tiles
 - Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`
 - `tile-char` / `tile-color` - display accessors (char and color are core game data)
-- `walkable?` / `transparent?` - property accessors
+- `walkable? [mover tile]` - checks if mover can traverse tile (considers entity abilities)
+- `transparent?` - property accessor
 
 ### Entities (`yarf.core`)
 
@@ -72,6 +73,12 @@ Entities are game objects (players, monsters, items) with position and display p
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal
 - `execute-action [action entity map]` - executes `:move-up`, `:move-down`, etc., `:quit`
 - Custom key maps: `{\w :move-up \s :move-down ...}`
+
+**Movement and terrain:**
+- `try-move [map entity dx dy]` - attempts move, checks bounds and walkability
+- Entities cannot move off map edges or into unwalkable tiles
+- Entity abilities affect terrain interaction:
+  - `:can-swim true` - entity can traverse water tiles
 
 ### Map Generation (`yarf.core`)
 
