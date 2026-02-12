@@ -80,6 +80,20 @@
   ([screen x y ch color]
    (s/put-string screen x y (str ch) {:fg color})))
 
+(defn render-entities
+  "Renders all visible entities to the screen."
+  [screen tile-map viewport]
+  (let [{:keys [width height offset-x offset-y]} viewport]
+    (doseq [entity (core/get-entities tile-map)]
+      (let [wx (core/entity-x entity)
+            wy (core/entity-y entity)
+            [sx sy] (world-to-screen viewport wx wy)]
+        (when (and (>= sx 0) (< sx width)
+                   (>= sy 0) (< sy height))
+          (let [ch (core/entity-char entity)
+                color (core/entity-color entity)]
+            (s/put-string screen sx sy (str ch) {:fg color})))))))
+
 (defn refresh
   "Refreshes the screen to show rendered content."
   [screen]

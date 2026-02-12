@@ -139,3 +139,72 @@
       (is (some #(= :floor (:type %)) (:tiles m)))
       ;; should have some wall tiles
       (is (some #(= :wall (:type %)) (:tiles m))))))
+
+;; Entity tests
+
+(deftest create-entity-test
+  (testing "creates an entity with id, char, color, and position"
+    (let [e (create-entity :player \@ :white 5 10)]
+      (is (= :player (entity-type e)))
+      (is (= \@ (entity-char e)))
+      (is (= :white (entity-color e)))
+      (is (= 5 (entity-x e)))
+      (is (= 10 (entity-y e)))))
+  (testing "creates entity with additional properties"
+    (let [e (create-entity :goblin \g :green 3 4 {:hp 10 :attack 2})]
+      (is (= :goblin (entity-type e)))
+      (is (= 10 (:hp e)))
+      (is (= 2 (:attack e))))))
+
+(deftest move-entity-test
+  (testing "moves entity to new position"
+    (let [e (-> (create-entity :player \@ :white 5 5)
+                (move-entity 10 15))]
+      (is (= 10 (entity-x e)))
+      (is (= 15 (entity-y e)))))
+  (testing "move-entity-by adds to current position"
+    (let [e (-> (create-entity :player \@ :white 5 5)
+                (move-entity-by 2 -1))]
+      (is (= 7 (entity-x e)))
+      (is (= 4 (entity-y e))))))
+
+(deftest map-entities-test
+  (testing "new map has no entities"
+    (let [m (create-tile-map 10 10)]
+      (is (empty? (get-entities m)))))
+  (testing "add-entity adds entity to map"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))]
+      (is (= 1 (count (get-entities m))))
+      (is (= e (first (get-entities m))))))
+  (testing "remove-entity removes entity from map"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e)
+                (remove-entity e))]
+      (is (empty? (get-entities m))))))
+
+(deftest get-entities-at-test
+  (testing "returns entities at specified position"
+    (let [player (create-entity :player \@ :white 5 5)
+          goblin (create-entity :goblin \g :green 5 5)
+          orc (create-entity :orc \o :green 3 3)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin)
+                (add-entity orc))]
+      (is (= 2 (count (get-entities-at m 5 5))))
+      (is (= 1 (count (get-entities-at m 3 3))))
+      (is (empty? (get-entities-at m 0 0))))))
+
+(deftest update-entity-test
+  (testing "updates entity in map"
+    (let [player (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          m2 (update-entity m player move-entity 10 10)
+          updated (first (get-entities-at m2 10 10))]
+      (is (= 10 (entity-x updated)))
+      (is (= 10 (entity-y updated)))
+      (is (empty? (get-entities-at m2 5 5))))))

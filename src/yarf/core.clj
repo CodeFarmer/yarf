@@ -49,7 +49,8 @@
   [width height]
   {:width width
    :height height
-   :tiles (vec (repeat (* width height) default-tile))})
+   :tiles (vec (repeat (* width height) default-tile))
+   :entities []})
 
 (defn map-width
   "Returns the width of the tile map."
@@ -129,3 +130,79 @@
       (make-room 5 15 12 10)
       (make-corridor 9 5 15 7)
       (make-corridor 10 14 10 20)))
+
+;; Entities
+
+(defn create-entity
+  "Creates an entity with type, display char, color, and position.
+   Optional properties map can be provided."
+  ([entity-type char color x y]
+   (create-entity entity-type char color x y {}))
+  ([entity-type char color x y properties]
+   (merge {:type entity-type :char char :color color :x x :y y} properties)))
+
+(defn entity-type
+  "Returns the type of an entity."
+  [entity]
+  (:type entity))
+
+(defn entity-char
+  "Returns the display character for an entity."
+  [entity]
+  (:char entity \?))
+
+(defn entity-color
+  "Returns the display color for an entity."
+  [entity]
+  (:color entity :white))
+
+(defn entity-x
+  "Returns the x coordinate of an entity."
+  [entity]
+  (:x entity))
+
+(defn entity-y
+  "Returns the y coordinate of an entity."
+  [entity]
+  (:y entity))
+
+(defn move-entity
+  "Moves an entity to a new position."
+  [entity x y]
+  (assoc entity :x x :y y))
+
+(defn move-entity-by
+  "Moves an entity by a relative offset."
+  [entity dx dy]
+  (move-entity entity (+ (entity-x entity) dx) (+ (entity-y entity) dy)))
+
+;; Map entity management
+
+(defn get-entities
+  "Returns all entities in the map."
+  [tile-map]
+  (:entities tile-map []))
+
+(defn add-entity
+  "Adds an entity to the map."
+  [tile-map entity]
+  (update tile-map :entities conj entity))
+
+(defn remove-entity
+  "Removes an entity from the map."
+  [tile-map entity]
+  (update tile-map :entities #(vec (remove #{entity} %))))
+
+(defn get-entities-at
+  "Returns all entities at the specified position."
+  [tile-map x y]
+  (filter #(and (= x (entity-x %)) (= y (entity-y %)))
+          (get-entities tile-map)))
+
+(defn update-entity
+  "Updates an entity in the map by applying f to it."
+  [tile-map entity f & args]
+  (let [updated (apply f entity args)]
+    (-> tile-map
+        (remove-entity entity)
+        (add-entity updated))))
