@@ -16,9 +16,7 @@
   (start-display [this] this)
   (stop-display [this] nil)
   (display-message [this message]
-    (reset! message-atom message))
-  (display-message [this message line]
-    (reset! message-atom {:text message :line line})))
+    (reset! message-atom message)))
 
 (defn make-mock-display
   ([] (make-mock-display nil))
@@ -78,11 +76,7 @@
       (is (= [5 3] (screen-to-world vp 0 0))))))
 
 (deftest display-message-test
-  (testing "display-message stores message in mock display"
+  (testing "display-message shows message in status bar"
     (let [d (make-mock-display)]
       (display-message d "Hello, world!")
-      (is (= "Hello, world!" @(:message-atom d)))))
-  (testing "display-message can show message at specific line"
-    (let [d (make-mock-display)]
-      (display-message d "Line 1" 0)
-      (is (= {:text "Line 1" :line 0} @(:message-atom d))))))
+      (is (= "Hello, world!" @(:message-atom d))))))

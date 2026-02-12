@@ -13,8 +13,7 @@
   (refresh-screen [this] "Refreshes the display to show rendered content.")
   (start-display [this] "Starts the display.")
   (stop-display [this] "Stops the display and cleans up.")
-  (display-message [this message] [this message line]
-    "Displays a message. Optional line parameter specifies vertical position."))
+  (display-message [this message] "Displays a message in the status bar."))
 
 ;; Viewport management
 
@@ -143,9 +142,9 @@
   (stop-display [this]
     (s/stop screen))
   (display-message [this message]
-    (display-message this message (:height viewport)))
-  (display-message [this message line]
-    (s/put-string screen 0 line message {:fg :white})))
+    (let [status-line (:height viewport)]
+      (s/put-string screen 0 status-line (apply str (repeat (:width viewport) \space)))
+      (s/put-string screen 0 status-line message {:fg :white}))))
 
 (defn create-curses-display
   "Creates a curses display with the given viewport.
