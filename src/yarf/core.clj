@@ -68,6 +68,18 @@
       (let [category (determine-category registry instance)]
         (get-type-property registry category (:type instance) property)))))
 
+(defn get-name
+  "Gets the name of an instance. Checks instance :name, then type :name,
+   then falls back to the type key as a string."
+  [registry instance]
+  (or (get-property registry instance :name)
+      (name (:type instance))))
+
+(defn get-description
+  "Gets the description of an instance. Checks instance, then type."
+  [registry instance]
+  (get-property registry instance :description))
+
 ;; Tile properties and constructors
 
 (defn make-tile
@@ -287,6 +299,26 @@
   (filter #(and (= x (entity-x %)) (= y (entity-y %)))
           (get-entities tile-map)))
 
+(defn look-at
+  "Returns information about what's at the given position.
+   Returns a map with :name, :description, :category (:entity or :tile), and :target.
+   Requires a type registry for name/description lookup."
+  [registry tile-map x y]
+  (let [entities (get-entities-at tile-map x y)
+        tile (get-tile tile-map x y)]
+    (if (seq entities)
+      ;; Return info about topmost entity (last added)
+      (let [entity (last entities)]
+        {:name (get-name registry entity)
+         :description (get-description registry entity)
+         :category :entity
+         :target entity})
+      ;; Return info about tile
+      {:name (get-name registry tile)
+       :description (get-description registry tile)
+       :category :tile
+       :target tile})))
+
 (defn update-entity
   "Updates an entity in the map by applying f to it."
   [tile-map entity f & args]
@@ -329,14 +361,17 @@
 (defn act-entity
   "Calls the entity's act function if it has one.
    The act function receives (entity, game-map) and returns updated map.
-   After acting, the entity's next-action is incremented by its delay."
+   After acting, the entity's next-action is incremented by its delay,
+   unless the action set :no-time on the result map."
   [tile-map entity]
   (if-let [act-fn (:act entity)]
     (let [result-map (act-fn entity tile-map)
-          acted-entity (find-acted-entity (get-entities result-map) entity)]
-      (if acted-entity
-        (update-entity result-map acted-entity increment-next-action)
-        result-map))
+          no-time? (:no-time result-map)
+          clean-map (dissoc result-map :no-time)
+          acted-entity (find-acted-entity (get-entities clean-map) entity)]
+      (if (and acted-entity (not no-time?))
+        (update-entity clean-map acted-entity increment-next-action)
+        clean-map))
     tile-map))
 
 (defn get-next-actor
@@ -378,7 +413,8 @@
    \y :move-up-left
    \u :move-up-right
    \b :move-down-left
-   \n :move-down-right})
+   \n :move-down-right
+   \x :look})
 
 (defn try-move
   "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable."
@@ -390,8 +426,13 @@
       (update-entity game-map entity move-entity-by dx dy)
       game-map)))
 
+(def no-time-actions
+  "Actions that don't consume a turn."
+  #{:look :quit})
+
 (defn execute-action
-  "Executes a player action, returning the updated game map."
+  "Executes a player action, returning the updated game map.
+   Movement actions consume time; :look and :quit do not."
   [action entity game-map]
   (case action
     :move-up (try-move game-map entity 0 -1)
@@ -402,6 +443,7 @@
     :move-up-right (try-move game-map entity 1 -1)
     :move-down-left (try-move game-map entity -1 1)
     :move-down-right (try-move game-map entity 1 1)
+    :look (assoc game-map :look-mode true :no-time true)
     :quit (assoc game-map :quit true)
     game-map))
 

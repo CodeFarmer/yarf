@@ -728,3 +728,86 @@
                 (add-entity p))
           m2 (act-entity m p)]
       (is (:quit m2)))))
+
+;; Look action tests
+
+(deftest default-key-map-look-test
+  (testing "default-key-map has x for look"
+    (is (= :look (default-key-map \x)))))
+
+(deftest get-name-test
+  (testing "get-name returns name from type registry"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin"}))
+          goblin (create-entity :goblin \g :green 0 0)]
+      (is (= "Goblin" (get-name registry goblin)))))
+  (testing "get-name returns instance name if present"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin"}))
+          named-goblin (create-entity :goblin \g :green 0 0 {:name "Grishnak"})]
+      (is (= "Grishnak" (get-name registry named-goblin)))))
+  (testing "get-name falls back to type key if no name defined"
+    (let [registry (create-type-registry)
+          goblin (create-entity :goblin \g :green 0 0)]
+      (is (= "goblin" (get-name registry goblin)))))
+  (testing "get-name works for tiles"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Stone Floor"}))]
+      (is (= "Stone Floor" (get-name registry floor-tile))))))
+
+(deftest get-description-test
+  (testing "get-description returns description from type registry"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:description "A small, vicious creature."}))
+          goblin (create-entity :goblin \g :green 0 0)]
+      (is (= "A small, vicious creature." (get-description registry goblin)))))
+  (testing "get-description returns instance description if present"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:description "A small goblin."}))
+          special (create-entity :goblin \g :green 0 0 {:description "The goblin chieftain, scarred and fierce."})]
+      (is (= "The goblin chieftain, scarred and fierce." (get-description registry special)))))
+  (testing "get-description returns nil if not defined"
+    (let [registry (create-type-registry)
+          goblin (create-entity :goblin \g :green 0 0)]
+      (is (nil? (get-description registry goblin))))))
+
+(deftest look-at-test
+  (testing "look-at returns entity info when entity is present"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin" :description "A small goblin."})
+                       (define-tile-type :floor {:name "Floor"}))
+          goblin (create-entity :goblin \g :green 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          info (look-at registry m 5 5)]
+      (is (= "Goblin" (:name info)))
+      (is (= "A small goblin." (:description info)))
+      (is (= :entity (:category info)))))
+  (testing "look-at returns tile info when no entity present"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
+          m (create-tile-map 10 10)
+          info (look-at registry m 5 5)]
+      (is (= "Stone Floor" (:name info)))
+      (is (= "Cold grey stone." (:description info)))
+      (is (= :tile (:category info)))))
+  (testing "look-at returns topmost entity when multiple present"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin"})
+                       (define-entity-type :item {:name "Gold Coin"}))
+          goblin (create-entity :goblin \g :green 5 5)
+          coin (create-entity :item \$ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity coin)
+                (add-entity goblin))  ;; goblin added last, on top
+          info (look-at registry m 5 5)]
+      (is (= "Goblin" (:name info))))))
+
+(deftest look-action-no-time-test
+  (testing "look action does not increment next-action"
+    (let [player (create-entity :player \@ :yellow 5 5 {:next-action 0 :delay 10})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          m2 (execute-action :look player m)
+          updated (get-player m2)]
+      (is (= 0 (entity-next-action updated))))))
