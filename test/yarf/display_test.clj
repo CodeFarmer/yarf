@@ -4,7 +4,7 @@
             [yarf.core :as core]))
 
 ;; Mock display for testing
-(defrecord MockDisplay [input-atom rendered-atom]
+(defrecord MockDisplay [input-atom rendered-atom message-atom]
   Display
   (get-input [this] @input-atom)
   (render-tile [this x y tile]
@@ -14,11 +14,15 @@
   (clear-screen [this] (reset! rendered-atom []))
   (refresh-screen [this] nil)
   (start-display [this] this)
-  (stop-display [this] nil))
+  (stop-display [this] nil)
+  (display-message [this message]
+    (reset! message-atom message))
+  (display-message [this message line]
+    (reset! message-atom {:text message :line line})))
 
 (defn make-mock-display
   ([] (make-mock-display nil))
-  ([input] (->MockDisplay (atom input) (atom []))))
+  ([input] (->MockDisplay (atom input) (atom []) (atom nil))))
 
 (deftest display-protocol-test
   (testing "mock display implements protocol"
@@ -72,3 +76,13 @@
                  (assoc :offset-x 5 :offset-y 3))]
       (is (= [10 10] (screen-to-world vp 5 7)))
       (is (= [5 3] (screen-to-world vp 0 0))))))
+
+(deftest display-message-test
+  (testing "display-message stores message in mock display"
+    (let [d (make-mock-display)]
+      (display-message d "Hello, world!")
+      (is (= "Hello, world!" @(:message-atom d)))))
+  (testing "display-message can show message at specific line"
+    (let [d (make-mock-display)]
+      (display-message d "Line 1" 0)
+      (is (= {:text "Line 1" :line 0} @(:message-atom d))))))
