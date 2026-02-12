@@ -37,11 +37,35 @@ Maps use a flat vector for tile storage with coordinate-to-index conversion.
 
 ### Tiles
 
-Tiles are maps with `:type` and properties (`:walkable`, `:transparent`).
+Tiles are maps with `:type`, `:char`, `:color`, and properties (`:walkable`, `:transparent`).
 
-- `make-tile [type properties]` - create custom tiles
+- `make-tile [type char color properties]` - create custom tiles
 - Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`
+- `tile-char` / `tile-color` - display accessors (char and color are core game data)
 - `walkable?` / `transparent?` - property accessors
+
+### Map Generation (`yarf.core`)
+
+- `fill-rect [map x y w h tile]` - fill rectangular region
+- `make-room [map x y w h]` - room with wall border and floor interior
+- `make-corridor [map x1 y1 x2 y2]` - L-shaped corridor
+- `generate-test-map [width height]` - sample map for testing
+
+### Display (`yarf.display`)
+
+Curses display using clojure-lanterna.
+
+**Viewport:**
+- `create-viewport [w h]` - create viewport
+- `center-viewport-on` / `clamp-to-map` - position viewport
+- `world-to-screen` / `screen-to-world` - coordinate conversion
+
+**Screen:**
+- `create-screen` - create lanterna screen (`:text`, `:swing`, `:auto`)
+- `start-screen` / `stop-screen` - lifecycle
+- `render-map [screen map viewport]` - draw visible map with colors
+- `render-char [screen x y ch]` or `[screen x y ch color]` - draw character
+- `get-key` / `get-key-non-blocking` - input handling
 
 ## Development Notes
 
