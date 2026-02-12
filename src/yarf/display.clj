@@ -2,6 +2,18 @@
   (:require [lanterna.screen :as s]
             [yarf.core :as core]))
 
+;; Display protocol
+
+(defprotocol Display
+  "Protocol for game display implementations."
+  (get-input [this] "Gets input from the display (blocking).")
+  (render-tile [this x y tile] "Renders a tile at screen coordinates.")
+  (render-entity [this x y entity] "Renders an entity at screen coordinates.")
+  (clear-screen [this] "Clears the display.")
+  (refresh-screen [this] "Refreshes the display to show rendered content.")
+  (start-display [this] "Starts the display.")
+  (stop-display [this] "Stops the display and cleans up."))
+
 ;; Viewport management
 
 (defn create-viewport
@@ -108,3 +120,62 @@
   "Returns the key if one is pressed, nil otherwise."
   [screen]
   (s/get-key screen))
+
+;; Curses display implementation
+
+(defrecord CursesDisplay [screen viewport]
+  Display
+  (get-input [this]
+    (s/get-key-blocking screen))
+  (render-tile [this x y tile]
+    (s/put-string screen x y (str (core/tile-char tile)) {:fg (core/tile-color tile)}))
+  (render-entity [this x y entity]
+    (s/put-string screen x y (str (core/entity-char entity)) {:fg (core/entity-color entity)}))
+  (clear-screen [this]
+    (s/clear screen))
+  (refresh-screen [this]
+    (s/redraw screen))
+  (start-display [this]
+    (s/start screen)
+    this)
+  (stop-display [this]
+    (s/stop screen)))
+
+(defn create-curses-display
+  "Creates a curses display with the given viewport.
+   screen-type can be :text, :swing, or :auto."
+  ([viewport] (create-curses-display viewport :auto))
+  ([viewport screen-type]
+   (->CursesDisplay (s/get-screen screen-type) viewport)))
+
+(defn render-map-to-display
+  "Renders the visible portion of the map to a Display."
+  [display tile-map]
+  (let [{:keys [width height offset-x offset-y]} (:viewport display)]
+    (doseq [sy (range height)
+            sx (range width)]
+      (let [wx (+ sx offset-x)
+            wy (+ sy offset-y)]
+        (when (core/in-bounds? tile-map wx wy)
+          (render-tile display sx sy (core/get-tile tile-map wx wy)))))))
+
+(defn render-entities-to-display
+  "Renders all visible entities to a Display."
+  [display tile-map]
+  (let [{:keys [width height]} (:viewport display)]
+    (doseq [entity (core/get-entities tile-map)]
+      (let [[sx sy] (world-to-screen (:viewport display)
+                                      (core/entity-x entity)
+                                      (core/entity-y entity))]
+        (when (and (>= sx 0) (< sx width)
+                   (>= sy 0) (< sy height))
+          (render-entity display sx sy entity))))))
+
+;; Player with display
+
+(defn create-player-with-display
+  "Creates a player entity that gets input from the given display."
+  [x y display]
+  (core/create-entity :player \@ :yellow x y
+                      {:act (core/make-player-act #(get-input display))
+                       :display display}))

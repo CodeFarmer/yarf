@@ -228,7 +228,7 @@
 
 (defn act-entity
   "Calls the entity's act function if it has one.
-   The act function receives the entity and game map, returns updated map."
+   The act function receives (entity, game-map) and returns updated map."
   [tile-map entity]
   (if-let [act-fn (:act entity)]
     (act-fn entity tile-map)
@@ -246,3 +246,17 @@
               m))
           tile-map
           (get-entities tile-map)))
+
+;; Player input handling
+
+(defn make-player-act
+  "Creates a player act function that calls input-fn to get input."
+  [input-fn]
+  (fn [entity game-map]
+    (let [input (input-fn)]
+      (case input
+        :up (update-entity game-map entity move-entity-by 0 -1)
+        :down (update-entity game-map entity move-entity-by 0 1)
+        :left (update-entity game-map entity move-entity-by -1 0)
+        :right (update-entity game-map entity move-entity-by 1 0)
+        game-map))))

@@ -3,6 +3,34 @@
             [yarf.display :refer :all]
             [yarf.core :as core]))
 
+;; Mock display for testing
+(defrecord MockDisplay [input-atom rendered-atom]
+  Display
+  (get-input [this] @input-atom)
+  (render-tile [this x y tile]
+    (swap! rendered-atom conj {:x x :y y :char (core/tile-char tile) :color (core/tile-color tile)}))
+  (render-entity [this x y entity]
+    (swap! rendered-atom conj {:x x :y y :char (core/entity-char entity) :color (core/entity-color entity)}))
+  (clear-screen [this] (reset! rendered-atom []))
+  (refresh-screen [this] nil)
+  (start-display [this] this)
+  (stop-display [this] nil))
+
+(defn make-mock-display
+  ([] (make-mock-display nil))
+  ([input] (->MockDisplay (atom input) (atom []))))
+
+(deftest display-protocol-test
+  (testing "mock display implements protocol"
+    (let [d (make-mock-display :up)]
+      (is (satisfies? Display d))
+      (is (= :up (get-input d)))))
+  (testing "mock display tracks rendered content"
+    (let [d (make-mock-display)]
+      (render-tile d 5 5 core/wall-tile)
+      (is (= 1 (count @(:rendered-atom d))))
+      (is (= \# (:char (first @(:rendered-atom d))))))))
+
 (deftest create-viewport-test
   (testing "creates viewport with specified dimensions"
     (let [vp (create-viewport 40 20)]

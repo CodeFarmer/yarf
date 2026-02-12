@@ -1,6 +1,19 @@
 (ns yarf.core-test
   (:require [clojure.test :refer :all]
-            [yarf.core :refer :all]))
+            [yarf.core :refer :all]
+            [yarf.display :as display]))
+
+(defn mock-display
+  "Creates a mock display that returns the given input."
+  [input-atom]
+  (reify display/Display
+    (get-input [_] @input-atom)
+    (render-tile [_ _ _ _] nil)
+    (render-entity [_ _ _ _] nil)
+    (clear-screen [_] nil)
+    (refresh-screen [_] nil)
+    (start-display [this] this)
+    (stop-display [_] nil)))
 
 (deftest create-tile-map-test
   (testing "creates a tile map with specified dimensions"
@@ -268,13 +281,66 @@
                        (update-entity game-map entity move-entity-by 1 0))
           e1 (create-entity :goblin \g :green 3 3 {:act move-right})
           e2 (create-entity :orc \o :green 7 7 {:act move-right})
-          p (create-player 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity e1)
-                (add-entity e2)
-                (add-entity p))
+                (add-entity e2))
           m2 (process-actors m)]
-      ;; both goblins moved, player didn't
       (is (= 1 (count (get-entities-at m2 4 3))))
-      (is (= 1 (count (get-entities-at m2 8 7))))
-      (is (= 1 (count (get-entities-at m2 5 5)))))))
+      (is (= 1 (count (get-entities-at m2 8 7)))))))
+
+;; Player input tests
+
+(deftest player-with-display-test
+  (testing "player gets input from display"
+    (let [input-atom (atom :right)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))
+          m2 (act-entity m p)]
+      (is (= 6 (entity-x (get-player m2))))))
+  (testing "player responds to different inputs"
+    (let [input-atom (atom :up)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))]
+      ;; move up
+      (reset! input-atom :up)
+      (let [m2 (act-entity m p)]
+        (is (= 4 (entity-y (get-player m2)))))
+      ;; move down
+      (reset! input-atom :down)
+      (let [m2 (act-entity m p)]
+        (is (= 6 (entity-y (get-player m2)))))
+      ;; move left
+      (reset! input-atom :left)
+      (let [m2 (act-entity m p)]
+        (is (= 4 (entity-x (get-player m2)))))
+      ;; move right
+      (reset! input-atom :right)
+      (let [m2 (act-entity m p)]
+        (is (= 6 (entity-x (get-player m2)))))))
+  (testing "player ignores unknown input"
+    (let [input-atom (atom :unknown)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))
+          m2 (act-entity m p)]
+      (is (= 5 (entity-x (get-player m2))))
+      (is (= 5 (entity-y (get-player m2))))))
+  (testing "process-actors includes player with display"
+    (let [input-atom (atom :right)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d)
+          move-right (fn [entity game-map]
+                       (update-entity game-map entity move-entity-by 1 0))
+          goblin (create-entity :goblin \g :green 3 3 {:act move-right})
+          m (-> (create-tile-map 10 10)
+                (add-entity p)
+                (add-entity goblin))
+          m2 (process-actors m)]
+      ;; both moved
+      (is (= 6 (entity-x (get-player m2))))
+      (is (= 1 (count (get-entities-at m2 4 3)))))))
