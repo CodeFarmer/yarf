@@ -251,16 +251,6 @@
   [entity]
   (:pos entity))
 
-(defn entity-x
-  "Returns the x coordinate of an entity."
-  [entity]
-  (first (:pos entity)))
-
-(defn entity-y
-  "Returns the y coordinate of an entity."
-  [entity]
-  (second (:pos entity)))
-
 (defn entity-delay
   "Returns the delay (ticks between actions) for an entity. Defaults to 10."
   [entity]
@@ -279,7 +269,8 @@
 (defn move-entity-by
   "Moves an entity by a relative offset."
   [entity dx dy]
-  (move-entity entity (+ (entity-x entity) dx) (+ (entity-y entity) dy)))
+  (let [[x y] (entity-pos entity)]
+    (move-entity entity (+ x dx) (+ y dy))))
 
 ;; Map entity management
 
@@ -301,7 +292,7 @@
 (defn get-entities-at
   "Returns all entities at the specified position."
   [tile-map x y]
-  (filter #(and (= x (entity-x %)) (= y (entity-y %)))
+  (filter #(= [x y] (entity-pos %))
           (get-entities tile-map)))
 
 (defn look-at
@@ -424,8 +415,9 @@
 (defn try-move
   "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable."
   [game-map entity dx dy]
-  (let [new-x (+ (entity-x entity) dx)
-        new-y (+ (entity-y entity) dy)
+  (let [[x y] (entity-pos entity)
+        new-x (+ x dx)
+        new-y (+ y dy)
         in-map (in-bounds? game-map new-x new-y)
         can-walk (and in-map (walkable? entity (get-tile game-map new-x new-y)))]
     (if can-walk

@@ -25,8 +25,7 @@
               player-after (core/get-player result)
               blocked? (and move-action?
                             player-after
-                            (= (core/entity-x entity) (core/entity-x player-after))
-                            (= (core/entity-y entity) (core/entity-y player-after)))]
+                            (= (core/entity-pos entity) (core/entity-pos player-after)))]
           (if blocked?
             (assoc result :message "bump!")
             result))
@@ -71,8 +70,7 @@
                           {:fg (core/tile-color tile)})))))
     ;; Render entities
     (doseq [entity (core/get-entities game-map)]
-      (let [wx (core/entity-x entity)
-            wy (core/entity-y entity)
+      (let [[wx wy] (core/entity-pos entity)
             sx (- wx offset-x)
             sy (- wy offset-y)]
         (when (and (>= sx 0) (< sx width)
@@ -88,9 +86,10 @@
   "Returns viewport centered on player."
   [game-map viewport]
   (if-let [player (core/get-player game-map)]
-    (-> viewport
-        (display/center-viewport-on (core/entity-x player) (core/entity-y player))
-        (display/clamp-to-map game-map))
+    (let [[x y] (core/entity-pos player)]
+      (-> viewport
+          (display/center-viewport-on x y)
+          (display/clamp-to-map game-map)))
     viewport))
 
 (defn game-loop

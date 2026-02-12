@@ -305,8 +305,8 @@
       (is (= :player (entity-type e)))
       (is (= \@ (entity-char e)))
       (is (= :white (entity-color e)))
-      (is (= 5 (entity-x e)))
-      (is (= 10 (entity-y e)))))
+      (is (= 5 (first (entity-pos e))))
+      (is (= 10 (second (entity-pos e))))))
   (testing "creates entity with additional properties"
     (let [e (create-entity :goblin \g :green 3 4 {:hp 10 :attack 2})]
       (is (= :goblin (entity-type e)))
@@ -317,13 +317,13 @@
   (testing "moves entity to new position"
     (let [e (-> (create-entity :player \@ :white 5 5)
                 (move-entity 10 15))]
-      (is (= 10 (entity-x e)))
-      (is (= 15 (entity-y e)))))
+      (is (= 10 (first (entity-pos e))))
+      (is (= 15 (second (entity-pos e))))))
   (testing "move-entity-by adds to current position"
     (let [e (-> (create-entity :player \@ :white 5 5)
                 (move-entity-by 2 -1))]
-      (is (= 7 (entity-x e)))
-      (is (= 4 (entity-y e))))))
+      (is (= 7 (first (entity-pos e))))
+      (is (= 4 (second (entity-pos e)))))))
 
 (deftest boundary-check-test
   (testing "entities cannot move off left edge"
@@ -331,32 +331,32 @@
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-left e m)]
-      (is (= 0 (entity-x (first (get-entities m2)))))))
+      (is (= 0 (first (entity-pos (first (get-entities m2))))))))
   (testing "entities cannot move off right edge"
     (let [e (create-entity :player \@ :white 9 5)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-right e m)]
-      (is (= 9 (entity-x (first (get-entities m2)))))))
+      (is (= 9 (first (entity-pos (first (get-entities m2))))))))
   (testing "entities cannot move off top edge"
     (let [e (create-entity :player \@ :white 5 0)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-up e m)]
-      (is (= 0 (entity-y (first (get-entities m2)))))))
+      (is (= 0 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities cannot move off bottom edge"
     (let [e (create-entity :player \@ :white 5 9)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-down e m)]
-      (is (= 9 (entity-y (first (get-entities m2)))))))
+      (is (= 9 (second (entity-pos (first (get-entities m2))))))))
   (testing "diagonal movement respects boundaries"
     (let [e (create-entity :player \@ :white 0 0)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-up-left e m)]
-      (is (= 0 (entity-x (first (get-entities m2)))))
-      (is (= 0 (entity-y (first (get-entities m2))))))))
+      (is (= 0 (first (entity-pos (first (get-entities m2))))))
+      (is (= 0 (second (entity-pos (first (get-entities m2)))))))))
 
 (deftest solid-tile-collision-test
   (testing "entities cannot move into wall tiles"
@@ -365,51 +365,51 @@
                 (set-tile 5 4 wall-tile)
                 (add-entity e))
           m2 (execute-action :move-up e m)]
-      (is (= 5 (entity-x (first (get-entities m2)))))
-      (is (= 5 (entity-y (first (get-entities m2)))))))
+      (is (= 5 (first (entity-pos (first (get-entities m2))))))
+      (is (= 5 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities can move into floor tiles"
     (let [e (create-entity :player \@ :white 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (execute-action :move-up e m)]
-      (is (= 5 (entity-x (first (get-entities m2)))))
-      (is (= 4 (entity-y (first (get-entities m2)))))))
+      (is (= 5 (first (entity-pos (first (get-entities m2))))))
+      (is (= 4 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities cannot move diagonally into walls"
     (let [e (create-entity :player \@ :white 5 5)
           m (-> (create-tile-map 10 10)
                 (set-tile 4 4 wall-tile)
                 (add-entity e))
           m2 (execute-action :move-up-left e m)]
-      (is (= 5 (entity-x (first (get-entities m2)))))
-      (is (= 5 (entity-y (first (get-entities m2)))))))
+      (is (= 5 (first (entity-pos (first (get-entities m2))))))
+      (is (= 5 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities can move into open doors"
     (let [e (create-entity :player \@ :white 5 5)
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 door-open-tile)
                 (add-entity e))
           m2 (execute-action :move-up e m)]
-      (is (= 4 (entity-y (first (get-entities m2)))))))
+      (is (= 4 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities cannot move into closed doors"
     (let [e (create-entity :player \@ :white 5 5)
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 door-closed-tile)
                 (add-entity e))
           m2 (execute-action :move-up e m)]
-      (is (= 5 (entity-y (first (get-entities m2)))))))
+      (is (= 5 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities with :can-swim can move into water"
     (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 water-tile)
                 (add-entity fish))
           m2 (try-move m fish 0 -1)]
-      (is (= 4 (entity-y (first (get-entities m2)))))))
+      (is (= 4 (second (entity-pos (first (get-entities m2))))))))
   (testing "entities without :can-swim cannot move into water"
     (let [player (create-entity :player \@ :white 5 5)
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 water-tile)
                 (add-entity player))
           m2 (try-move m player 0 -1)]
-      (is (= 5 (entity-y (first (get-entities m2))))))))
+      (is (= 5 (second (entity-pos (first (get-entities m2)))))))))
 
 (deftest map-entities-test
   (testing "new map has no entities"
@@ -448,8 +448,8 @@
                 (add-entity player))
           m2 (update-entity m player move-entity 10 10)
           updated (first (get-entities-at m2 10 10))]
-      (is (= 10 (entity-x updated)))
-      (is (= 10 (entity-y updated)))
+      (is (= 10 (first (entity-pos updated))))
+      (is (= 10 (second (entity-pos updated))))
       (is (empty? (get-entities-at m2 5 5))))))
 
 ;; Player entity tests
@@ -460,8 +460,8 @@
       (is (= :player (entity-type p)))
       (is (= \@ (entity-char p)))
       (is (= :yellow (entity-color p)))
-      (is (= 5 (entity-x p)))
-      (is (= 10 (entity-y p)))))
+      (is (= 5 (first (entity-pos p))))
+      (is (= 10 (second (entity-pos p))))))
   (testing "player can be added to map"
     (let [p (create-player 3 3)
           m (-> (create-tile-map 10 10)
@@ -497,7 +497,7 @@
           m (-> (create-tile-map 10 10)
                 (add-entity e))
           m2 (act-entity m e)]
-      (is (= 6 (entity-x (first (get-entities m2)))))))
+      (is (= 6 (first (entity-pos (first (get-entities m2))))))))
   (testing "act-entity returns unchanged map for entities without act"
     (let [p (create-player 5 5)
           m (-> (create-tile-map 10 10)
@@ -608,7 +608,7 @@
           m (-> (create-tile-map 10 10)
                 (add-entity p))
           m2 (act-entity m p)]
-      (is (= 6 (entity-x (get-player m2))))))
+      (is (= 6 (first (entity-pos (get-player m2)))))))
   (testing "player responds to vi-style hjkl inputs"
     (let [input-atom (atom \k)
           d (mock-display input-atom)
@@ -618,19 +618,19 @@
       ;; k = up
       (reset! input-atom \k)
       (let [m2 (act-entity m p)]
-        (is (= 4 (entity-y (get-player m2)))))
+        (is (= 4 (second (entity-pos (get-player m2))))))
       ;; j = down
       (reset! input-atom \j)
       (let [m2 (act-entity m p)]
-        (is (= 6 (entity-y (get-player m2)))))
+        (is (= 6 (second (entity-pos (get-player m2))))))
       ;; h = left
       (reset! input-atom \h)
       (let [m2 (act-entity m p)]
-        (is (= 4 (entity-x (get-player m2)))))
+        (is (= 4 (first (entity-pos (get-player m2))))))
       ;; l = right
       (reset! input-atom \l)
       (let [m2 (act-entity m p)]
-        (is (= 6 (entity-x (get-player m2)))))))
+        (is (= 6 (first (entity-pos (get-player m2))))))))
   (testing "player responds to diagonal yubn inputs"
     (let [input-atom (atom \y)
           d (mock-display input-atom)
@@ -641,26 +641,26 @@
       (reset! input-atom \y)
       (let [m2 (act-entity m p)
             player (get-player m2)]
-        (is (= 4 (entity-x player)))
-        (is (= 4 (entity-y player))))
+        (is (= 4 (first (entity-pos player))))
+        (is (= 4 (second (entity-pos player)))))
       ;; u = up-right
       (reset! input-atom \u)
       (let [m2 (act-entity m p)
             player (get-player m2)]
-        (is (= 6 (entity-x player)))
-        (is (= 4 (entity-y player))))
+        (is (= 6 (first (entity-pos player))))
+        (is (= 4 (second (entity-pos player)))))
       ;; b = down-left
       (reset! input-atom \b)
       (let [m2 (act-entity m p)
             player (get-player m2)]
-        (is (= 4 (entity-x player)))
-        (is (= 6 (entity-y player))))
+        (is (= 4 (first (entity-pos player))))
+        (is (= 6 (second (entity-pos player)))))
       ;; n = down-right
       (reset! input-atom \n)
       (let [m2 (act-entity m p)
             player (get-player m2)]
-        (is (= 6 (entity-x player)))
-        (is (= 6 (entity-y player))))))
+        (is (= 6 (first (entity-pos player))))
+        (is (= 6 (second (entity-pos player)))))))
   (testing "player ignores unknown input"
     (let [input-atom (atom :unknown)
           d (mock-display input-atom)
@@ -668,8 +668,8 @@
           m (-> (create-tile-map 10 10)
                 (add-entity p))
           m2 (act-entity m p)]
-      (is (= 5 (entity-x (get-player m2))))
-      (is (= 5 (entity-y (get-player m2))))))
+      (is (= 5 (first (entity-pos (get-player m2)))))
+      (is (= 5 (second (entity-pos (get-player m2)))))))
   (testing "process-actors includes player with display"
     (let [input-atom (atom \l)
           d (mock-display input-atom)
@@ -682,7 +682,7 @@
                 (add-entity goblin))
           m2 (process-actors m)]
       ;; both moved
-      (is (= 6 (entity-x (get-player m2))))
+      (is (= 6 (first (entity-pos (get-player m2)))))
       (is (= 1 (count (get-entities-at m2 4 3)))))))
 
 ;; Custom key mapping tests
@@ -712,11 +712,11 @@
                 (add-entity p))]
       ;; w = up
       (let [m2 (act-entity m p)]
-        (is (= 4 (entity-y (get-player m2)))))
+        (is (= 4 (second (entity-pos (get-player m2))))))
       ;; d = right
       (reset! input-atom \d)
       (let [m2 (act-entity m p)]
-        (is (= 6 (entity-x (get-player m2)))))))
+        (is (= 6 (first (entity-pos (get-player m2))))))))
   (testing "custom key map can include quit action"
     (let [custom-keys {\q :quit
                        :escape :quit

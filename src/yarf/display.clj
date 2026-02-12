@@ -98,8 +98,7 @@
   [screen tile-map viewport]
   (let [{:keys [width height offset-x offset-y]} viewport]
     (doseq [entity (core/get-entities tile-map)]
-      (let [wx (core/entity-x entity)
-            wy (core/entity-y entity)
+      (let [[wx wy] (core/entity-pos entity)
             [sx sy] (world-to-screen viewport wx wy)]
         (when (and (>= sx 0) (< sx width)
                    (>= sy 0) (< sy height))
@@ -169,9 +168,8 @@
   [display tile-map]
   (let [{:keys [width height]} (:viewport display)]
     (doseq [entity (core/get-entities tile-map)]
-      (let [[sx sy] (world-to-screen (:viewport display)
-                                      (core/entity-x entity)
-                                      (core/entity-y entity))]
+      (let [[wx wy] (core/entity-pos entity)
+            [sx sy] (world-to-screen (:viewport display) wx wy)]
         (when (and (>= sx 0) (< sx width)
                    (>= sy 0) (< sy height))
           (render-entity display sx sy entity))))))

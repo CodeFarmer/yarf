@@ -73,8 +73,7 @@ Entities are game objects (players, monsters, items) with position and display p
 
 - `create-entity [type char color x y]` or `[type char color x y props]`
 - `entity-type`, `entity-char`, `entity-color` - accessors
-- `entity-pos` - returns `[x y]` vector
-- `entity-x`, `entity-y` - individual coordinate accessors
+- `entity-pos` - returns `[x y]` position vector
 - `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - movement
 
 **Map entity management:**
