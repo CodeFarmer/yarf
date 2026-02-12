@@ -104,7 +104,6 @@ Entities are game objects (players, monsters, items) with position and display p
 
 **Movement and terrain:**
 - `try-move [map entity dx dy]` - attempts move, checks bounds and walkability
-- Sets `:blocked true` on map if movement was blocked by solid tile
 - Entities cannot move off map edges or into unwalkable tiles
 - Entity abilities affect terrain interaction:
   - `:can-swim true` - entity can traverse water tiles
@@ -115,7 +114,6 @@ Entities are game objects (players, monsters, items) with position and display p
 - `look-at [registry map x y]` - returns `{:name :description :category :target}` for position
 
 **Map flags:**
-- `:blocked` - set by `try-move` when movement fails
 - `:message` - displayed in message bar by game loop
 - `:no-time` - action doesn't increment `next-action`
 - `:look-mode` - signals entry to look mode
@@ -162,7 +160,7 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Player and two wandering goblins
 - Viewport follows player
 - Shows "bump!" in message bar when walking into walls
-- Custom player via `make-demo-player-act` (converts `:blocked` to `:message`)
+- Custom player via `make-demo-player-act` (detects blocked movement by position comparison)
 
 ## Development Notes
 

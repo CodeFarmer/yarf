@@ -417,8 +417,7 @@
    \x :look})
 
 (defn try-move
-  "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable.
-   Sets :blocked on the map if movement was blocked by a solid tile."
+  "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable."
   [game-map entity dx dy]
   (let [new-x (+ (entity-x entity) dx)
         new-y (+ (entity-y entity) dy)
@@ -426,7 +425,7 @@
         can-walk (and in-map (walkable? entity (get-tile game-map new-x new-y)))]
     (if can-walk
       (update-entity game-map entity move-entity-by dx dy)
-      (assoc game-map :blocked true))))
+      game-map)))
 
 (def no-time-actions
   "Actions that don't consume a turn."

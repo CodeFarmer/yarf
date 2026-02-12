@@ -17,13 +17,18 @@
   [input-fn key-map]
   (fn [entity game-map]
     (let [input (input-fn)
-          action (get key-map input)]
+          action (get key-map input)
+          move-action? (#{:move-up :move-down :move-left :move-right
+                          :move-up-left :move-up-right :move-down-left :move-down-right} action)]
       (if action
-        (let [result (core/execute-action action entity game-map)]
-          (if (:blocked result)
-            (-> result
-                (dissoc :blocked)
-                (assoc :message "bump!"))
+        (let [result (core/execute-action action entity game-map)
+              player-after (core/get-player result)
+              blocked? (and move-action?
+                            player-after
+                            (= (core/entity-x entity) (core/entity-x player-after))
+                            (= (core/entity-y entity) (core/entity-y player-after)))]
+          (if blocked?
+            (assoc result :message "bump!")
             result))
         game-map))))
 
