@@ -11,11 +11,27 @@
          {\q :quit
           :escape :quit}))
 
+(defn make-demo-player-act
+  "Creates a player act function with bump feedback.
+   Wraps the base player behavior to add 'bump!' message on blocked movement."
+  [input-fn key-map]
+  (fn [entity game-map]
+    (let [input (input-fn)
+          action (get key-map input)]
+      (if action
+        (let [result (core/execute-action action entity game-map)]
+          (if (:blocked result)
+            (-> result
+                (dissoc :blocked)
+                (assoc :message "bump!"))
+            result))
+        game-map))))
+
 (defn create-demo-player
-  "Creates a player for the demo with vi-style movement and quit."
+  "Creates a player for the demo with vi-style movement, quit, and bump feedback."
   [x y screen]
   (core/create-entity :player \@ :yellow x y
-                      {:act (core/make-player-act #(s/get-key-blocking screen) demo-key-map)}))
+                      {:act (make-demo-player-act #(s/get-key-blocking screen) demo-key-map)}))
 
 (defn create-wandering-goblin
   "Creates a goblin that wanders randomly."
@@ -80,8 +96,8 @@
     (let [vp (center-viewport-on-player game-map viewport)]
       (render-game screen game-map vp message)
       (let [new-map (core/process-actors game-map)
-            new-message (when (:blocked new-map) "bump!")
-            clean-map (dissoc new-map :blocked)]
+            new-message (:message new-map)
+            clean-map (dissoc new-map :message)]
         (if (:quit clean-map)
           :quit
           (recur clean-map new-message))))))
