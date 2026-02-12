@@ -79,6 +79,13 @@ Entities are game objects (players, monsters, items) with position and display p
 - `process-actors [map]` - processes all entities with act functions
 - `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn
 
+**Action timing:**
+- `entity-delay` - ticks between actions (default 10). Lower = faster.
+- `entity-next-action` - tick when entity can act next (default 0)
+- `get-next-actor [map]` - returns entity with lowest next-action
+- `process-next-actor [map]` - processes only the next actor
+- After acting, `next-action` is incremented by `delay`
+
 **Key mappings (`yarf.core`):**
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal
 - `execute-action [action entity map]` - executes `:move-up`, `:move-down`, etc., `:quit`
