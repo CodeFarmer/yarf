@@ -25,8 +25,26 @@ lein uberjar       # Build executable JAR
 - `doc/` - Documentation
 - `project.clj` - Leiningen configuration
 
+## Architecture
+
+### Tile Maps (`yarf.core`)
+
+Maps use a flat vector for tile storage with coordinate-to-index conversion.
+
+- `create-tile-map [width height]` - creates map filled with floor tiles
+- `get-tile / set-tile` - coordinate-based access (immutable updates)
+- `in-bounds?` - boundary checking
+
+### Tiles
+
+Tiles are maps with `:type` and properties (`:walkable`, `:transparent`).
+
+- `make-tile [type properties]` - create custom tiles
+- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`
+- `walkable?` / `transparent?` - property accessors
+
 ## Development Notes
 
 - Clojure version: 1.10.3
 - License: EPL-2.0 OR GPL-2.0-or-later
-- Current status: Early scaffolding phase
+- Uses TDD: write failing tests first, then implement
