@@ -218,3 +218,31 @@
   "Returns the player entity from the map, or nil if not found."
   [tile-map]
   (first (filter #(= :player (entity-type %)) (get-entities tile-map))))
+
+;; Entity actions
+
+(defn can-act?
+  "Returns true if the entity has an act function."
+  [entity]
+  (fn? (:act entity)))
+
+(defn act-entity
+  "Calls the entity's act function if it has one.
+   The act function receives the entity and game map, returns updated map."
+  [tile-map entity]
+  (if-let [act-fn (:act entity)]
+    (act-fn entity tile-map)
+    tile-map))
+
+(defn process-actors
+  "Processes all entities that have act functions."
+  [tile-map]
+  (reduce (fn [m entity]
+            (if (can-act? entity)
+              ;; Re-fetch entity from map in case it was modified
+              (if-let [current (first (filter #(= entity %) (get-entities m)))]
+                (act-entity m current)
+                m)
+              m))
+          tile-map
+          (get-entities tile-map)))

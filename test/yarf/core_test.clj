@@ -235,3 +235,46 @@
   (testing "returns nil if no player in map"
     (let [m (create-tile-map 10 10)]
       (is (nil? (get-player m))))))
+
+;; Entity act function tests
+
+(deftest entity-act-test
+  (testing "entities can have an act function"
+    (let [wander-fn (fn [entity game-map]
+                      (update-entity game-map entity move-entity-by 1 0))
+          e (create-entity :goblin \g :green 5 5 {:act wander-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity e))]
+      (is (can-act? e))
+      (is (not (can-act? (create-player 0 0))))))
+  (testing "act-entity calls entity's act function"
+    (let [wander-fn (fn [entity game-map]
+                      (update-entity game-map entity move-entity-by 1 0))
+          e (create-entity :goblin \g :green 5 5 {:act wander-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (act-entity m e)]
+      (is (= 6 (entity-x (first (get-entities m2)))))))
+  (testing "act-entity returns unchanged map for entities without act"
+    (let [p (create-player 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))
+          m2 (act-entity m p)]
+      (is (= m m2)))))
+
+(deftest process-actors-test
+  (testing "processes all entities with act functions"
+    (let [move-right (fn [entity game-map]
+                       (update-entity game-map entity move-entity-by 1 0))
+          e1 (create-entity :goblin \g :green 3 3 {:act move-right})
+          e2 (create-entity :orc \o :green 7 7 {:act move-right})
+          p (create-player 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e1)
+                (add-entity e2)
+                (add-entity p))
+          m2 (process-actors m)]
+      ;; both goblins moved, player didn't
+      (is (= 1 (count (get-entities-at m2 4 3))))
+      (is (= 1 (count (get-entities-at m2 8 7))))
+      (is (= 1 (count (get-entities-at m2 5 5)))))))
