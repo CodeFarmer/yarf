@@ -44,6 +44,19 @@ Tiles are maps with `:type`, `:char`, `:color`, and properties (`:walkable`, `:t
 - `tile-char` / `tile-color` - display accessors (char and color are core game data)
 - `walkable?` / `transparent?` - property accessors
 
+### Entities (`yarf.core`)
+
+Entities are game objects (players, monsters, items) with position and display properties.
+
+- `create-entity [type char color x y]` or `[type char color x y props]`
+- `entity-type`, `entity-char`, `entity-color`, `entity-x`, `entity-y` - accessors
+- `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - movement
+
+**Map entity management:**
+- `add-entity` / `remove-entity` - add/remove from map
+- `get-entities` / `get-entities-at [map x y]` - query entities
+- `update-entity [map entity f & args]` - update entity in place
+
 ### Map Generation (`yarf.core`)
 
 - `fill-rect [map x y w h tile]` - fill rectangular region
@@ -64,6 +77,7 @@ Curses display using clojure-lanterna.
 - `create-screen` - create lanterna screen (`:text`, `:swing`, `:auto`)
 - `start-screen` / `stop-screen` - lifecycle
 - `render-map [screen map viewport]` - draw visible map with colors
+- `render-entities [screen map viewport]` - draw visible entities
 - `render-char [screen x y ch]` or `[screen x y ch color]` - draw character
 - `get-key` / `get-key-non-blocking` - input handling
 
