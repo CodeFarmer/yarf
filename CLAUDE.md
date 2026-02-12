@@ -28,6 +28,16 @@ lein uberjar       # Build executable JAR
 
 ## Architecture
 
+### Type Registry (`yarf.core`)
+
+Types define shared immutable properties (description, lore, etc.) for entities and tiles. Game authors can add custom properties (species, family, generation frequency).
+
+- `create-type-registry` - creates empty registry
+- `define-entity-type [registry type-key properties]` - register entity type
+- `define-tile-type [registry type-key properties]` - register tile type
+- `get-type-property [registry category type-key property]` - get property (category is `:entity` or `:tile`)
+- `get-instance-type-property [registry instance property]` - get property from entity/tile instance
+
 ### Tile Maps (`yarf.core`)
 
 Maps use a flat vector for tile storage with coordinate-to-index conversion.
