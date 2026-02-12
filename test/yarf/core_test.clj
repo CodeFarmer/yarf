@@ -65,3 +65,49 @@
       (is (not (walkable? t)))
       (is (transparent? t))
       (is (= 10 (:damage t))))))
+
+;; Map generation tests
+
+(deftest fill-rect-test
+  (testing "fills rectangular region with specified tile"
+    (let [m (-> (create-tile-map 10 10)
+                (fill-rect 2 2 5 4 wall-tile))]
+      (is (= :wall (:type (get-tile m 2 2))))
+      (is (= :wall (:type (get-tile m 6 5))))
+      (is (= :floor (:type (get-tile m 1 1))))
+      (is (= :floor (:type (get-tile m 7 6)))))))
+
+(deftest make-room-test
+  (testing "creates a room with floor interior and wall border"
+    (let [m (-> (create-tile-map 20 20)
+                (fill-rect 0 0 20 20 wall-tile)
+                (make-room 5 5 6 4))]
+      ;; walls on border
+      (is (= :wall (:type (get-tile m 5 5))))
+      (is (= :wall (:type (get-tile m 10 8))))
+      ;; floor inside
+      (is (= :floor (:type (get-tile m 6 6))))
+      (is (= :floor (:type (get-tile m 9 7)))))))
+
+(deftest make-corridor-test
+  (testing "creates horizontal then vertical corridor between points"
+    (let [m (-> (create-tile-map 20 20)
+                (fill-rect 0 0 20 20 wall-tile)
+                (make-corridor 2 2 8 6))]
+      ;; horizontal segment
+      (is (= :floor (:type (get-tile m 2 2))))
+      (is (= :floor (:type (get-tile m 5 2))))
+      (is (= :floor (:type (get-tile m 8 2))))
+      ;; vertical segment
+      (is (= :floor (:type (get-tile m 8 4))))
+      (is (= :floor (:type (get-tile m 8 6)))))))
+
+(deftest generate-test-map-test
+  (testing "generates a simple test map with rooms and corridors"
+    (let [m (generate-test-map 40 30)]
+      (is (= 40 (map-width m)))
+      (is (= 30 (map-height m)))
+      ;; should have some floor tiles (rooms/corridors)
+      (is (some #(= :floor (:type %)) (:tiles m)))
+      ;; should have some wall tiles
+      (is (some #(= :wall (:type %)) (:tiles m))))))
