@@ -2,6 +2,7 @@
 
 ;; Type registry
 ;; Types define shared immutable properties for entities and tiles (description, lore, etc.)
+;; Types can have a :parent for single inheritance.
 
 (defn create-type-registry
   "Creates an empty type registry for storing entity and tile type definitions."
@@ -11,31 +12,61 @@
 
 (defn define-tile-type
   "Defines a tile type with the given properties.
-   Properties typically include :description, :lore, and game-specific attributes."
+   Properties typically include :description, :lore, and game-specific attributes.
+   Use :parent to inherit from another tile type."
   [registry type-key properties]
   (assoc-in registry [:tile type-key] properties))
 
 (defn define-entity-type
   "Defines an entity type with the given properties.
-   Properties typically include :description, :lore, and game-specific attributes."
+   Properties typically include :description, :lore, and game-specific attributes.
+   Use :parent to inherit from another entity type."
   [registry type-key properties]
   (assoc-in registry [:entity type-key] properties))
 
 (defn get-type-property
-  "Gets a property from a type definition.
+  "Gets a property from a type definition, following the inheritance chain.
    category is :entity or :tile, type-key is the type identifier."
   [registry category type-key property]
-  (get-in registry [category type-key property]))
+  (loop [current-type type-key]
+    (when current-type
+      (let [type-def (get-in registry [category current-type])
+            value (get type-def property)]
+        (if (and (nil? value) (contains? type-def :parent))
+          (recur (:parent type-def))
+          value)))))
 
 (defn get-instance-type-property
   "Gets a type property from an entity or tile instance.
-   Looks up the instance's :type in the registry and returns the property."
+   Looks up the instance's :type in the registry and returns the property.
+   Follows the inheritance chain if the type has a :parent."
   [registry instance property]
   (let [type-key (:type instance)
         ;; Try entity first, then tile
-        entity-prop (get-in registry [:entity type-key property])
-        tile-prop (get-in registry [:tile type-key property])]
+        entity-prop (get-type-property registry :entity type-key property)
+        tile-prop (get-type-property registry :tile type-key property)]
     (or entity-prop tile-prop)))
+
+(defn- determine-category
+  "Determines if an instance is an entity or tile based on registry contents."
+  [registry instance]
+  (let [type-key (:type instance)]
+    (cond
+      (get-in registry [:entity type-key]) :entity
+      (get-in registry [:tile type-key]) :tile
+      ;; Default guess based on presence of position (entities have x/y)
+      (contains? instance :x) :entity
+      :else :tile)))
+
+(defn get-property
+  "Gets a property from an instance, falling back to its type definition.
+   Checks the instance first, then the type (following inheritance chain)."
+  [registry instance property]
+  (let [instance-value (get instance property)]
+    (if (some? instance-value)
+      instance-value
+      (let [category (determine-category registry instance)]
+        (get-type-property registry category (:type instance) property)))))
 
 ;; Tile properties and constructors
 

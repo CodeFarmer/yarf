@@ -175,6 +175,82 @@
           player (create-player 5 5)]
       (is (nil? (get-instance-type-property registry player :description))))))
 
+(deftest instance-property-fallback-test
+  (testing "instance properties override type properties"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin
+                         {:description "A small goblin"
+                          :base-hp 10}))
+          ;; This goblin has a custom description
+          special-goblin (create-entity :goblin \g :green 0 0 {:description "A goblin chieftain"})]
+      (is (= "A goblin chieftain" (get-property registry special-goblin :description)))
+      (is (= 10 (get-property registry special-goblin :base-hp)))))
+  (testing "falls back to type when instance lacks property"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :orc
+                         {:description "A brutish orc"
+                          :base-hp 20}))
+          orc (create-entity :orc \o :green 0 0)]
+      (is (= "A brutish orc" (get-property registry orc :description)))
+      (is (= 20 (get-property registry orc :base-hp)))))
+  (testing "works for tiles too"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor
+                         {:description "Stone floor"
+                          :material :stone}))
+          custom-floor (make-tile :floor \. :white {:walkable true :description "Marble floor"})]
+      (is (= "Marble floor" (get-property registry custom-floor :description)))
+      (is (= :stone (get-property registry custom-floor :material))))))
+
+(deftest type-inheritance-test
+  (testing "types can have a parent type"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :creature
+                         {:category :living
+                          :can-die true})
+                       (define-entity-type :humanoid
+                         {:parent :creature
+                          :has-hands true
+                          :base-hp 10})
+                       (define-entity-type :goblin
+                         {:parent :humanoid
+                          :description "A small goblin"
+                          :base-hp 5}))]
+      ;; Direct property
+      (is (= "A small goblin" (get-type-property registry :entity :goblin :description)))
+      ;; Overridden from parent
+      (is (= 5 (get-type-property registry :entity :goblin :base-hp)))
+      ;; Inherited from parent
+      (is (= true (get-type-property registry :entity :goblin :has-hands)))
+      ;; Inherited from grandparent
+      (is (= :living (get-type-property registry :entity :goblin :category)))
+      (is (= true (get-type-property registry :entity :goblin :can-die)))))
+  (testing "inheritance works for tiles"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :door
+                         {:description "A door"
+                          :openable true})
+                       (define-tile-type :door-closed
+                         {:parent :door
+                          :walkable false})
+                       (define-tile-type :door-open
+                         {:parent :door
+                          :walkable true}))]
+      (is (= true (get-type-property registry :tile :door-closed :openable)))
+      (is (= true (get-type-property registry :tile :door-open :openable)))
+      (is (= false (get-type-property registry :tile :door-closed :walkable)))
+      (is (= true (get-type-property registry :tile :door-open :walkable)))))
+  (testing "get-property uses full inheritance chain"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :creature
+                         {:mortal true})
+                       (define-entity-type :goblin
+                         {:parent :creature
+                          :base-hp 5}))
+          goblin (create-entity :goblin \g :green 0 0)]
+      (is (= true (get-property registry goblin :mortal)))
+      (is (= 5 (get-property registry goblin :base-hp))))))
+
 ;; Map generation tests
 
 (deftest fill-rect-test
