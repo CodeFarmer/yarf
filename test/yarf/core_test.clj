@@ -409,7 +409,20 @@
                 (set-tile 5 4 water-tile)
                 (add-entity player))
           m2 (try-move m player 0 -1)]
-      (is (= 5 (entity-y (first (get-entities m2))))))))
+      (is (= 5 (entity-y (first (get-entities m2)))))))
+  (testing "blocked movement sets :blocked flag on map"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 wall-tile)
+                (add-entity e))
+          m2 (try-move m e 0 -1)]
+      (is (:blocked m2))))
+  (testing "successful movement does not set :blocked flag"
+    (let [e (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (try-move m e 0 -1)]
+      (is (not (:blocked m2))))))
 
 (deftest map-entities-test
   (testing "new map has no entities"

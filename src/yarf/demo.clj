@@ -36,7 +36,7 @@
 
 (defn render-game
   "Renders the game to the screen."
-  [screen game-map viewport]
+  [screen game-map viewport message]
   (s/clear screen)
   (let [{:keys [width height offset-x offset-y]} viewport]
     ;; Render tiles
@@ -57,7 +57,10 @@
         (when (and (>= sx 0) (< sx width)
                    (>= sy 0) (< sy height))
           (s/put-string screen sx sy (str (core/entity-char entity))
-                        {:fg (core/entity-color entity)})))))
+                        {:fg (core/entity-color entity)}))))
+    ;; Render message bar
+    (when message
+      (s/put-string screen 0 height message {:fg :white})))
   (s/redraw screen))
 
 (defn center-viewport-on-player
@@ -72,13 +75,16 @@
 (defn game-loop
   "Main game loop."
   [screen initial-map viewport]
-  (loop [game-map initial-map]
+  (loop [game-map initial-map
+         message nil]
     (let [vp (center-viewport-on-player game-map viewport)]
-      (render-game screen game-map vp)
-      (let [new-map (core/process-actors game-map)]
-        (if (:quit new-map)
+      (render-game screen game-map vp message)
+      (let [new-map (core/process-actors game-map)
+            new-message (when (:blocked new-map) "bump!")
+            clean-map (dissoc new-map :blocked)]
+        (if (:quit clean-map)
           :quit
-          (recur new-map))))))
+          (recur clean-map new-message))))))
 
 (defn run-demo
   "Runs the demo game."
