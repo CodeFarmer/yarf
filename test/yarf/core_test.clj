@@ -442,6 +442,86 @@
       (is (= 1 (count (get-entities-at m2 4 3))))
       (is (= 1 (count (get-entities-at m2 8 7)))))))
 
+;; Action timing tests
+
+(deftest entity-delay-test
+  (testing "entities can have a delay property"
+    (let [fast (create-entity :rat \r :white 0 0 {:delay 5})
+          slow (create-entity :turtle \t :green 0 0 {:delay 20})]
+      (is (= 5 (entity-delay fast)))
+      (is (= 20 (entity-delay slow)))))
+  (testing "entities without delay default to 10"
+    (let [e (create-entity :goblin \g :green 0 0)]
+      (is (= 10 (entity-delay e))))))
+
+(deftest entity-next-action-test
+  (testing "entities default to next-action of 0"
+    (let [e (create-entity :goblin \g :green 0 0)]
+      (is (= 0 (entity-next-action e)))))
+  (testing "entities can have custom next-action"
+    (let [e (create-entity :goblin \g :green 0 0 {:next-action 50})]
+      (is (= 50 (entity-next-action e))))))
+
+(deftest act-increments-next-action-test
+  (testing "acting increments next-action by delay"
+    (let [act-fn (fn [entity game-map]
+                   (update-entity game-map entity move-entity-by 1 0))
+          e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (act-entity m e)
+          updated (first (get-entities m2))]
+      (is (= 15 (entity-next-action updated)))))
+  (testing "acting uses default delay when not specified"
+    (let [act-fn (fn [entity game-map]
+                   (update-entity game-map entity move-entity-by 1 0))
+          e (create-entity :goblin \g :green 5 5 {:act act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (act-entity m e)
+          updated (first (get-entities m2))]
+      (is (= 10 (entity-next-action updated))))))
+
+(deftest next-actor-test
+  (testing "get-next-actor returns entity with lowest next-action"
+    (let [e1 (create-entity :goblin \g :green 0 0 {:act identity :next-action 20})
+          e2 (create-entity :orc \o :green 1 1 {:act identity :next-action 5})
+          e3 (create-entity :troll \T :green 2 2 {:act identity :next-action 15})
+          m (-> (create-tile-map 10 10)
+                (add-entity e1)
+                (add-entity e2)
+                (add-entity e3))]
+      (is (= :orc (entity-type (get-next-actor m))))))
+  (testing "get-next-actor returns nil when no actors"
+    (let [e (create-entity :rock \* :gray 0 0)  ;; no act function
+          m (-> (create-tile-map 10 10)
+                (add-entity e))]
+      (is (nil? (get-next-actor m)))))
+  (testing "get-next-actor only considers entities with act functions"
+    (let [rock (create-entity :rock \* :gray 0 0 {:next-action 0})  ;; lowest but can't act
+          goblin (create-entity :goblin \g :green 1 1 {:act identity :next-action 10})
+          m (-> (create-tile-map 10 10)
+                (add-entity rock)
+                (add-entity goblin))]
+      (is (= :goblin (entity-type (get-next-actor m)))))))
+
+(deftest process-next-actor-test
+  (testing "process-next-actor processes only the entity with lowest next-action"
+    (let [move-right (fn [entity game-map]
+                       (update-entity game-map entity move-entity-by 1 0))
+          fast (create-entity :rat \r :white 3 3 {:act move-right :delay 5 :next-action 0})
+          slow (create-entity :turtle \t :green 7 7 {:act move-right :delay 20 :next-action 10})
+          m (-> (create-tile-map 10 10)
+                (add-entity fast)
+                (add-entity slow))
+          m2 (process-next-actor m)]
+      ;; Only fast moved (it had lower next-action)
+      (is (= 1 (count (get-entities-at m2 4 3))))  ;; rat moved
+      (is (= 1 (count (get-entities-at m2 7 7))))  ;; turtle stayed
+      ;; Fast's next-action was incremented
+      (let [rat (first (filter #(= :rat (entity-type %)) (get-entities m2)))]
+        (is (= 5 (entity-next-action rat)))))))
+
 ;; Player input tests
 
 (deftest player-with-display-test

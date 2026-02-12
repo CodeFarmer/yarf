@@ -213,6 +213,16 @@
   [entity]
   (:y entity))
 
+(defn entity-delay
+  "Returns the delay (ticks between actions) for an entity. Defaults to 10."
+  [entity]
+  (:delay entity 10))
+
+(defn entity-next-action
+  "Returns the next-action tick for an entity. Defaults to 0."
+  [entity]
+  (:next-action entity 0))
+
 (defn move-entity
   "Moves an entity to a new position."
   [entity x y]
@@ -273,12 +283,44 @@
   [entity]
   (fn? (:act entity)))
 
+(defn- increment-next-action
+  "Increments an entity's next-action by its delay."
+  [entity]
+  (assoc entity :next-action (+ (entity-next-action entity) (entity-delay entity))))
+
+(defn- find-acted-entity
+  "Finds the entity that acted by matching type and act function."
+  [entities original-entity]
+  (first (filter #(and (= (:type %) (:type original-entity))
+                       (= (:act %) (:act original-entity)))
+                 entities)))
+
 (defn act-entity
   "Calls the entity's act function if it has one.
-   The act function receives (entity, game-map) and returns updated map."
+   The act function receives (entity, game-map) and returns updated map.
+   After acting, the entity's next-action is incremented by its delay."
   [tile-map entity]
   (if-let [act-fn (:act entity)]
-    (act-fn entity tile-map)
+    (let [result-map (act-fn entity tile-map)
+          acted-entity (find-acted-entity (get-entities result-map) entity)]
+      (if acted-entity
+        (update-entity result-map acted-entity increment-next-action)
+        result-map))
+    tile-map))
+
+(defn get-next-actor
+  "Returns the entity with the lowest next-action value that can act, or nil if none."
+  [tile-map]
+  (->> (get-entities tile-map)
+       (filter can-act?)
+       (sort-by entity-next-action)
+       first))
+
+(defn process-next-actor
+  "Processes only the entity with the lowest next-action value."
+  [tile-map]
+  (if-let [actor (get-next-actor tile-map)]
+    (act-entity tile-map actor)
     tile-map))
 
 (defn process-actors
