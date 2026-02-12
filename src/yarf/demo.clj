@@ -12,24 +12,20 @@
           :escape :quit}))
 
 (defn make-demo-player-act
-  "Creates a player act function with bump feedback.
-   Wraps the base player behavior to add 'bump!' message on blocked movement."
+  "Creates a player act function for the demo.
+   Loops until an action that affects the world is performed.
+   Failed moves and unknown keys are retried immediately."
   [input-fn key-map]
   (fn [entity game-map]
-    (let [input (input-fn)
-          action (get key-map input)
-          move-action? (#{:move-up :move-down :move-left :move-right
-                          :move-up-left :move-up-right :move-down-left :move-down-right} action)]
-      (if action
-        (let [result (core/execute-action action entity game-map)
-              player-after (core/get-player result)
-              blocked? (and move-action?
-                            player-after
-                            (= (core/entity-pos entity) (core/entity-pos player-after)))]
-          (if blocked?
-            (assoc result :message "bump!")
-            result))
-        game-map))))
+    (loop []
+      (let [input (input-fn)
+            action (get key-map input)
+            result (if action
+                     (core/execute-action action entity game-map)
+                     (assoc game-map :no-time true :retry true))]
+        (if (:retry result)
+          (recur)
+          result)))))
 
 (defn create-demo-player
   "Creates a player for the demo with vi-style movement, quit, and bump feedback."

@@ -343,9 +343,10 @@
   (fn? (:act entity)))
 
 (defn- increment-next-action
-  "Increments an entity's next-action by its delay."
-  [entity]
-  (assoc entity :next-action (+ (entity-next-action entity) (entity-delay entity))))
+  "Increments an entity's next-action by the given time, or its delay if not specified."
+  ([entity] (increment-next-action entity (entity-delay entity)))
+  ([entity time]
+   (assoc entity :next-action (+ (entity-next-action entity) time))))
 
 (defn- find-acted-entity
   "Finds the entity that acted by matching type and act function."
@@ -357,16 +358,19 @@
 (defn act-entity
   "Calls the entity's act function if it has one.
    The act function receives (entity, game-map) and returns updated map.
-   After acting, the entity's next-action is incremented by its delay,
-   unless the action set :no-time on the result map."
+   After acting, the entity's next-action is incremented by :action-time
+   if present, otherwise by its delay. If :no-time is set, no increment occurs."
   [tile-map entity]
   (if-let [act-fn (:act entity)]
     (let [result-map (act-fn entity tile-map)
           no-time? (:no-time result-map)
-          clean-map (dissoc result-map :no-time)
+          action-time (:action-time result-map)
+          clean-map (dissoc result-map :no-time :action-time :retry)
           acted-entity (find-acted-entity (get-entities clean-map) entity)]
       (if (and acted-entity (not no-time?))
-        (update-entity clean-map acted-entity increment-next-action)
+        (if action-time
+          (update-entity clean-map acted-entity increment-next-action action-time)
+          (update-entity clean-map acted-entity increment-next-action))
         clean-map))
     tile-map))
 
@@ -413,7 +417,8 @@
    \x :look})
 
 (defn try-move
-  "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable."
+  "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable.
+   Sets :no-time and :retry flags if the move fails."
   [game-map entity dx dy]
   (let [[x y] (entity-pos entity)
         new-x (+ x dx)
@@ -422,7 +427,7 @@
         can-walk (and in-map (walkable? entity (get-tile game-map new-x new-y)))]
     (if can-walk
       (update-entity game-map entity move-entity-by dx dy)
-      game-map)))
+      (assoc game-map :no-time true :retry true))))
 
 (def no-time-actions
   "Actions that don't consume a turn."
@@ -447,12 +452,18 @@
 
 (defn make-player-act
   "Creates a player act function that calls input-fn to get input.
-   Optional key-map translates input keys to actions."
+   Optional key-map translates input keys to actions.
+   Loops until an action that affects the world is performed.
+   Failed moves and unknown keys are retried immediately."
   ([input-fn] (make-player-act input-fn default-key-map))
   ([input-fn key-map]
    (fn [entity game-map]
-     (let [input (input-fn)
-           action (get key-map input)]
-       (if action
-         (execute-action action entity game-map)
-         game-map)))))
+     (loop []
+       (let [input (input-fn)
+             action (get key-map input)
+             result (if action
+                      (execute-action action entity game-map)
+                      (assoc game-map :no-time true :retry true))]
+         (if (:retry result)
+           (recur)
+           result))))))

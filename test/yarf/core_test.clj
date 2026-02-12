@@ -409,7 +409,21 @@
                 (set-tile 5 4 water-tile)
                 (add-entity player))
           m2 (try-move m player 0 -1)]
-      (is (= 5 (second (entity-pos (first (get-entities m2)))))))))
+      (is (= 5 (second (entity-pos (first (get-entities m2))))))))
+  (testing "failed moves set :no-time and :retry flags"
+    (let [player (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 wall-tile)
+                (add-entity player))
+          m2 (try-move m player 0 -1)]
+      (is (:no-time m2))
+      (is (:retry m2))))
+  (testing "successful moves don't set retry flag"
+    (let [player (create-entity :player \@ :white 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          m2 (try-move m player 0 -1)]
+      (is (nil? (:retry m2))))))
 
 (deftest map-entities-test
   (testing "new map has no entities"
@@ -556,7 +570,28 @@
                 (add-entity e))
           m2 (act-entity m e)
           updated (first (get-entities m2))]
-      (is (= 10 (entity-next-action updated))))))
+      (is (= 10 (entity-next-action updated)))))
+  (testing "action can specify custom :action-time"
+    (let [act-fn (fn [entity game-map]
+                   (assoc (update-entity game-map entity move-entity-by 1 0)
+                          :action-time 5))
+          e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          m2 (act-entity m e)
+          updated (first (get-entities m2))]
+      (is (= 5 (entity-next-action updated)))))
+  (testing ":action-time overrides entity delay"
+    (let [slow-action (fn [entity game-map]
+                        (assoc (update-entity game-map entity move-entity-by 1 0)
+                               :action-time 50))
+          fast-entity (create-entity :rat \r :white 5 5 {:act slow-action :delay 2})
+          m (-> (create-tile-map 10 10)
+                (add-entity fast-entity))
+          m2 (act-entity m fast-entity)
+          updated (first (get-entities m2))]
+      ;; Even though entity has delay 2, action took 50
+      (is (= 50 (entity-next-action updated))))))
 
 (deftest next-actor-test
   (testing "get-next-actor returns entity with lowest next-action"
@@ -661,14 +696,32 @@
             player (get-player m2)]
         (is (= 6 (first (entity-pos player))))
         (is (= 6 (second (entity-pos player)))))))
-  (testing "player ignores unknown input"
-    (let [input-atom (atom :unknown)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d)
+  (testing "player retries on unknown input until valid input"
+    (let [inputs (atom [:unknown :invalid \l])  ;; two invalid, then valid
+          input-fn #(let [i (first @inputs)]
+                      (swap! inputs rest)
+                      i)
+          p (create-entity :player \@ :yellow 5 5
+                           {:act (make-player-act input-fn default-key-map)})
           m (-> (create-tile-map 10 10)
                 (add-entity p))
           m2 (act-entity m p)]
-      (is (= 5 (first (entity-pos (get-player m2)))))
+      ;; Should have moved right (the \l input) after skipping invalid inputs
+      (is (= 6 (first (entity-pos (get-player m2)))))
+      (is (= 5 (second (entity-pos (get-player m2)))))))
+  (testing "player retries on blocked movement until valid move"
+    (let [inputs (atom [\k \k \l])  ;; two blocked moves (into wall), then valid
+          input-fn #(let [i (first @inputs)]
+                      (swap! inputs rest)
+                      i)
+          p (create-entity :player \@ :yellow 5 5
+                           {:act (make-player-act input-fn default-key-map)})
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 wall-tile)  ;; wall above player
+                (add-entity p))
+          m2 (act-entity m p)]
+      ;; Should have moved right after failing to move up twice
+      (is (= 6 (first (entity-pos (get-player m2)))))
       (is (= 5 (second (entity-pos (get-player m2)))))))
   (testing "process-actors includes player with display"
     (let [input-atom (atom \l)

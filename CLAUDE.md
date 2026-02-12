@@ -92,11 +92,12 @@ Entities are game objects (players, monsters, items) with position and display p
 - `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn
 
 **Action timing:**
-- `entity-delay` - ticks between actions (default 10). Lower = faster.
+- `entity-delay` - default ticks between actions (default 10). Lower = faster.
 - `entity-next-action` - tick when entity can act next (default 0)
 - `get-next-actor [map]` - returns entity with lowest next-action
 - `process-next-actor [map]` - processes only the next actor
-- After acting, `next-action` is incremented by `delay`
+- After acting, `next-action` is incremented by `:action-time` if present, otherwise by entity's `delay`
+- Actions can return `:action-time N` to specify custom time cost (e.g., quick attack = 5, heavy attack = 20)
 
 **Key mappings (`yarf.core`):**
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal, `x` look
@@ -106,8 +107,14 @@ Entities are game objects (players, monsters, items) with position and display p
 **Movement and terrain:**
 - `try-move [map entity dx dy]` - attempts move, checks bounds and walkability
 - Entities cannot move off map edges or into unwalkable tiles
+- Failed moves set `:no-time true` and `:retry true` flags
 - Entity abilities affect terrain interaction:
   - `:can-swim true` - entity can traverse water tiles
+
+**Input retry behavior:**
+- `make-player-act` loops until an action that affects the world is performed
+- Failed moves and unknown keys are retried immediately without consuming time
+- Valid actions (successful moves, look, quit) exit the loop
 
 **Looking at objects (`yarf.core`):**
 - `get-name [registry instance]` - returns name (instance, type, or type-key as fallback)
@@ -117,6 +124,8 @@ Entities are game objects (players, monsters, items) with position and display p
 **Map flags:**
 - `:message` - displayed in message bar by game loop
 - `:no-time` - action doesn't increment `next-action`
+- `:action-time N` - action takes N ticks instead of entity's delay
+- `:retry` - action had no effect, poll for new input (used with `:no-time`)
 - `:look-mode` - signals entry to look mode
 - `:quit` - signals game should exit
 
@@ -160,8 +169,7 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - Player and two wandering goblins
 - Viewport follows player
-- Shows "bump!" in message bar when walking into walls
-- Custom player via `make-demo-player-act` (detects blocked movement by position comparison)
+- Invalid inputs (unknown keys, blocked moves) are retried immediately
 
 ## Development Notes
 
