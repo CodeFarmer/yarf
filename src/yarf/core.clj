@@ -249,14 +249,40 @@
 
 ;; Player input handling
 
+(def default-key-map
+  "Default key bindings using vi-style hjklyubn for movement."
+  {\h :move-left
+   \j :move-down
+   \k :move-up
+   \l :move-right
+   \y :move-up-left
+   \u :move-up-right
+   \b :move-down-left
+   \n :move-down-right})
+
+(defn execute-action
+  "Executes a player action, returning the updated game map."
+  [action entity game-map]
+  (case action
+    :move-up (update-entity game-map entity move-entity-by 0 -1)
+    :move-down (update-entity game-map entity move-entity-by 0 1)
+    :move-left (update-entity game-map entity move-entity-by -1 0)
+    :move-right (update-entity game-map entity move-entity-by 1 0)
+    :move-up-left (update-entity game-map entity move-entity-by -1 -1)
+    :move-up-right (update-entity game-map entity move-entity-by 1 -1)
+    :move-down-left (update-entity game-map entity move-entity-by -1 1)
+    :move-down-right (update-entity game-map entity move-entity-by 1 1)
+    :quit (assoc game-map :quit true)
+    game-map))
+
 (defn make-player-act
-  "Creates a player act function that calls input-fn to get input."
-  [input-fn]
-  (fn [entity game-map]
-    (let [input (input-fn)]
-      (case input
-        :up (update-entity game-map entity move-entity-by 0 -1)
-        :down (update-entity game-map entity move-entity-by 0 1)
-        :left (update-entity game-map entity move-entity-by -1 0)
-        :right (update-entity game-map entity move-entity-by 1 0)
-        game-map))))
+  "Creates a player act function that calls input-fn to get input.
+   Optional key-map translates input keys to actions."
+  ([input-fn] (make-player-act input-fn default-key-map))
+  ([input-fn key-map]
+   (fn [entity game-map]
+     (let [input (input-fn)
+           action (get key-map input)]
+       (if action
+         (execute-action action entity game-map)
+         game-map)))))

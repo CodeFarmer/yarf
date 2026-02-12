@@ -292,35 +292,65 @@
 
 (deftest player-with-display-test
   (testing "player gets input from display"
-    (let [input-atom (atom :right)
+    (let [input-atom (atom \l)
           d (mock-display input-atom)
           p (display/create-player-with-display 5 5 d)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
           m2 (act-entity m p)]
       (is (= 6 (entity-x (get-player m2))))))
-  (testing "player responds to different inputs"
-    (let [input-atom (atom :up)
+  (testing "player responds to vi-style hjkl inputs"
+    (let [input-atom (atom \k)
           d (mock-display input-atom)
           p (display/create-player-with-display 5 5 d)
           m (-> (create-tile-map 10 10)
                 (add-entity p))]
-      ;; move up
-      (reset! input-atom :up)
+      ;; k = up
+      (reset! input-atom \k)
       (let [m2 (act-entity m p)]
         (is (= 4 (entity-y (get-player m2)))))
-      ;; move down
-      (reset! input-atom :down)
+      ;; j = down
+      (reset! input-atom \j)
       (let [m2 (act-entity m p)]
         (is (= 6 (entity-y (get-player m2)))))
-      ;; move left
-      (reset! input-atom :left)
+      ;; h = left
+      (reset! input-atom \h)
       (let [m2 (act-entity m p)]
         (is (= 4 (entity-x (get-player m2)))))
-      ;; move right
-      (reset! input-atom :right)
+      ;; l = right
+      (reset! input-atom \l)
       (let [m2 (act-entity m p)]
         (is (= 6 (entity-x (get-player m2)))))))
+  (testing "player responds to diagonal yubn inputs"
+    (let [input-atom (atom \y)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))]
+      ;; y = up-left
+      (reset! input-atom \y)
+      (let [m2 (act-entity m p)
+            player (get-player m2)]
+        (is (= 4 (entity-x player)))
+        (is (= 4 (entity-y player))))
+      ;; u = up-right
+      (reset! input-atom \u)
+      (let [m2 (act-entity m p)
+            player (get-player m2)]
+        (is (= 6 (entity-x player)))
+        (is (= 4 (entity-y player))))
+      ;; b = down-left
+      (reset! input-atom \b)
+      (let [m2 (act-entity m p)
+            player (get-player m2)]
+        (is (= 4 (entity-x player)))
+        (is (= 6 (entity-y player))))
+      ;; n = down-right
+      (reset! input-atom \n)
+      (let [m2 (act-entity m p)
+            player (get-player m2)]
+        (is (= 6 (entity-x player)))
+        (is (= 6 (entity-y player))))))
   (testing "player ignores unknown input"
     (let [input-atom (atom :unknown)
           d (mock-display input-atom)
@@ -331,7 +361,7 @@
       (is (= 5 (entity-x (get-player m2))))
       (is (= 5 (entity-y (get-player m2))))))
   (testing "process-actors includes player with display"
-    (let [input-atom (atom :right)
+    (let [input-atom (atom \l)
           d (mock-display input-atom)
           p (display/create-player-with-display 5 5 d)
           move-right (fn [entity game-map]
@@ -344,3 +374,47 @@
       ;; both moved
       (is (= 6 (entity-x (get-player m2))))
       (is (= 1 (count (get-entities-at m2 4 3)))))))
+
+;; Custom key mapping tests
+
+(deftest default-key-map-test
+  (testing "default-key-map has vi-style hjkl bindings"
+    (is (= :move-left (default-key-map \h)))
+    (is (= :move-down (default-key-map \j)))
+    (is (= :move-up (default-key-map \k)))
+    (is (= :move-right (default-key-map \l))))
+  (testing "default-key-map has diagonal yubn bindings"
+    (is (= :move-up-left (default-key-map \y)))
+    (is (= :move-up-right (default-key-map \u)))
+    (is (= :move-down-left (default-key-map \b)))
+    (is (= :move-down-right (default-key-map \n)))))
+
+(deftest custom-key-map-test
+  (testing "player can use custom key mappings"
+    (let [wasd-keys {\w :move-up
+                     \s :move-down
+                     \a :move-left
+                     \d :move-right}
+          input-atom (atom \w)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d wasd-keys)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))]
+      ;; w = up
+      (let [m2 (act-entity m p)]
+        (is (= 4 (entity-y (get-player m2)))))
+      ;; d = right
+      (reset! input-atom \d)
+      (let [m2 (act-entity m p)]
+        (is (= 6 (entity-x (get-player m2)))))))
+  (testing "custom key map can include quit action"
+    (let [custom-keys {\q :quit
+                       :escape :quit
+                       :up :move-up}
+          input-atom (atom \q)
+          d (mock-display input-atom)
+          p (display/create-player-with-display 5 5 d custom-keys)
+          m (-> (create-tile-map 10 10)
+                (add-entity p))
+          m2 (act-entity m p)]
+      (is (:quit m2)))))

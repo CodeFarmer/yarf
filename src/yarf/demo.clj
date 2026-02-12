@@ -5,25 +5,17 @@
             [lanterna.screen :as s])
   (:gen-class))
 
-(defn make-demo-player-act
-  "Creates player act function that handles movement and quit."
-  [input-fn]
-  (fn [entity game-map]
-    (let [input (input-fn)]
-      (case input
-        :up (core/update-entity game-map entity core/move-entity-by 0 -1)
-        :down (core/update-entity game-map entity core/move-entity-by 0 1)
-        :left (core/update-entity game-map entity core/move-entity-by -1 0)
-        :right (core/update-entity game-map entity core/move-entity-by 1 0)
-        :escape (assoc game-map :quit true)
-        \q (assoc game-map :quit true)
-        game-map))))
+(def demo-key-map
+  "Key bindings for demo: vi-style movement plus quit."
+  (merge core/default-key-map
+         {\q :quit
+          :escape :quit}))
 
 (defn create-demo-player
-  "Creates a player for the demo with quit handling."
+  "Creates a player for the demo with vi-style movement and quit."
   [x y screen]
   (core/create-entity :player \@ :yellow x y
-                      {:act (make-demo-player-act #(s/get-key-blocking screen))}))
+                      {:act (core/make-player-act #(s/get-key-blocking screen) demo-key-map)}))
 
 (defn create-wandering-goblin
   "Creates a goblin that wanders randomly."
@@ -92,7 +84,8 @@
   "Runs the demo game."
   []
   (println "Starting YARF demo...")
-  (println "Use arrow keys to move, 'q' or ESC to quit.")
+  (println "Movement: hjkl (vi-style), yubn (diagonals)")
+  (println "Quit: q or ESC")
   (println "Press Enter to start...")
   (read-line)
   (let [screen (s/get-screen :swing)
