@@ -74,7 +74,7 @@ Entities are game objects (players, monsters, items) with position and display p
 - `create-entity [type char color x y]` or `[type char color x y props]`
 - `entity-type`, `entity-char`, `entity-color` - accessors
 - `entity-pos` - returns `[x y]` position vector
-- `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - movement
+- `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - low-level movement (no bounds checking)
 
 **Map entity management:**
 - `add-entity` / `remove-entity` - add/remove from map
@@ -105,7 +105,8 @@ Entities are game objects (players, monsters, items) with position and display p
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
-- `try-move [map entity dx dy]` - attempts move, checks bounds and walkability
+- `try-move [map entity dx dy]` - safe movement with bounds and walkability checks
+- Use `try-move` for all map-aware movement (players and NPCs)
 - Entities cannot move off map edges or into unwalkable tiles
 - Failed moves set `:no-time true` and `:retry true` flags
 - Entity abilities affect terrain interaction:

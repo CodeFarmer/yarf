@@ -40,7 +40,7 @@
                       {:act (fn [e m]
                               (let [dx (- (rand-int 3) 1)
                                     dy (- (rand-int 3) 1)]
-                                (core/update-entity m e core/move-entity-by dx dy)))}))
+                                (core/try-move m e dx dy)))}))
 
 (defn create-demo-game
   "Creates a demo game state."
