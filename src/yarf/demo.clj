@@ -47,7 +47,14 @@
     ;; Render message bar
     (s/put-string screen 0 height (apply str (repeat width \space)) {:fg :white})
     (when message
-      (s/put-string screen 0 height message {:fg :white})))
+      (s/put-string screen 0 height message {:fg :white}))
+    ;; Position cursor on player
+    (when-let [player (core/get-player game-map)]
+      (let [[wx wy] (core/entity-pos player)
+            px (- wx offset-x)
+            py (- wy offset-y)]
+        (when (and (>= px 0) (< px width) (>= py 0) (< py height))
+          (s/move-cursor screen px py)))))
   (s/redraw screen))
 
 (defn render-look-frame
@@ -58,15 +65,10 @@
         sy (- cy offset-y)]
     ;; Render normal game frame with look name as message
     (render-game screen game-map viewport (:name look-info))
-    ;; Overlay cursor highlight in magenta
+    ;; Position cursor on examined square
     (when (and (>= sx 0) (< sx width)
                (>= sy 0) (< sy height))
-      (let [entities (core/get-entities-at game-map cx cy)
-            tile (core/get-tile game-map cx cy)
-            ch (if (seq entities)
-                 (core/entity-char (last entities))
-                 (core/tile-char tile))]
-        (s/put-string screen sx sy (str ch) {:fg :magenta})))
+      (s/move-cursor screen sx sy))
     (s/redraw screen)))
 
 (defn create-demo-player
@@ -134,8 +136,9 @@
   (println "Quit: q or ESC")
   (println "Press Enter to start...")
   (read-line)
-  (let [screen (s/get-screen :swing)
-        viewport (display/create-viewport 50 25)
+  (let [viewport (display/create-viewport 50 25)
+        screen (s/get-screen :swing {:cols (:width viewport)
+                                     :rows (inc (:height viewport))})
         registry (create-demo-registry)]
     (s/start screen)
     (try
