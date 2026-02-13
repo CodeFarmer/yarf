@@ -14,7 +14,8 @@
 (defn make-demo-player-act
   "Creates a player act function for the demo.
    Loops until an action that affects the world is performed.
-   Failed moves and unknown keys are retried immediately."
+   Failed moves and unknown keys are retried immediately.
+   Returns an action-result map."
   [input-fn key-map]
   (fn [entity game-map]
     (loop []
@@ -22,7 +23,7 @@
             action (get key-map input)
             result (if action
                      (core/execute-action action entity game-map)
-                     (assoc game-map :no-time true :retry true))]
+                     {:map game-map :no-time true :retry true})]
         (if (:retry result)
           (recur)
           result)))))
@@ -95,12 +96,11 @@
          message nil]
     (let [vp (center-viewport-on-player game-map viewport)]
       (render-game screen game-map vp message)
-      (let [new-map (core/process-actors game-map)
-            new-message (:message new-map)
-            clean-map (dissoc new-map :message)]
-        (if (:quit clean-map)
+      (let [result (core/process-actors game-map)
+            {:keys [map quit message]} result]
+        (if quit
           :quit
-          (recur clean-map new-message))))))
+          (recur map message))))))
 
 (defn run-demo
   "Runs the demo game."

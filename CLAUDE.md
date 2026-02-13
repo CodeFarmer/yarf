@@ -85,30 +85,44 @@ Entities are game objects (players, monsters, items) with position and display p
 - `create-player [x y]` - creates player (`@`, yellow, no input)
 - `get-player [map]` - retrieves player from map
 
-**Entity actions:**
+**Entity actions and action-results:**
+
+Act functions receive `(entity, game-map)` and return an **action-result** map:
+```clojure
+{:map     updated-game-map   ;; REQUIRED - clean game state
+ ;; Optional:
+ :time-cost  10              ;; ticks this action costs (default: entity's :delay)
+ :no-time    true            ;; action costs zero time
+ :retry      true            ;; action had no effect, retry input
+ :quit       true            ;; game should exit
+ :message    "text"          ;; display to player
+ :look-mode  true            ;; enter look mode
+}
+```
+
 - `can-act? [entity]` - true if entity has `:act` function
-- `act-entity [map entity]` - calls entity's act fn `(fn [entity map] -> map)`
-- `process-actors [map]` - processes all entities with act functions
-- `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn
+- `act-entity [map entity]` - calls entity's act fn, processes timing, returns action-result
+- `process-actors [map]` - processes all actors, returns action-result with accumulated flags
+- `process-next-actor [map]` - processes next actor, returns action-result
+- `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn (returns action-result)
 
 **Action timing:**
 - `entity-delay` - default ticks between actions (default 10). Lower = faster.
 - `entity-next-action` - tick when entity can act next (default 0)
 - `get-next-actor [map]` - returns entity with lowest next-action
-- `process-next-actor [map]` - processes only the next actor
-- After acting, `next-action` is incremented by `:action-time` if present, otherwise by entity's `delay`
-- Actions can return `:action-time N` to specify custom time cost (e.g., quick attack = 5, heavy attack = 20)
+- After acting, `next-action` is incremented by `:time-cost` if present, otherwise by entity's `delay`
+- Actions can return `:time-cost N` to specify custom time cost (e.g., quick attack = 5, heavy attack = 20)
 
 **Key mappings (`yarf.core`):**
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal, `x` look
-- `execute-action [action entity map]` - executes `:move-*`, `:look`, `:quit`
+- `execute-action [action entity map]` - executes `:move-*`, `:look`, `:quit`; returns action-result
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
-- `try-move [map entity dx dy]` - safe movement with bounds and walkability checks
+- `try-move [map entity dx dy]` - safe movement with bounds and walkability checks; returns action-result
 - Use `try-move` for all map-aware movement (players and NPCs)
 - Entities cannot move off map edges or into unwalkable tiles
-- Failed moves set `:no-time true` and `:retry true` flags
+- Failed moves return `{:map game-map :no-time true :retry true}`
 - Entity abilities affect terrain interaction:
   - `:can-swim true` - entity can traverse water tiles
 
@@ -122,10 +136,12 @@ Entities are game objects (players, monsters, items) with position and display p
 - `get-description [registry instance]` - returns description from instance or type
 - `look-at [registry map x y]` - returns `{:name :description :category :target}` for position
 
-**Map flags:**
+**Action-result flags:**
+Action-results are returned by act functions, `try-move`, `execute-action`, `act-entity`, `process-actors`, etc.
+The `:map` key always contains the game map (clean, no flags embedded).
 - `:message` - displayed in message bar by game loop
 - `:no-time` - action doesn't increment `next-action`
-- `:action-time N` - action takes N ticks instead of entity's delay
+- `:time-cost N` - action takes N ticks instead of entity's delay
 - `:retry` - action had no effect, poll for new input (used with `:no-time`)
 - `:look-mode` - signals entry to look mode
 - `:quit` - signals game should exit

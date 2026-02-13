@@ -357,22 +357,22 @@
 
 (defn act-entity
   "Calls the entity's act function if it has one.
-   The act function receives (entity, game-map) and returns updated map.
-   After acting, the entity's next-action is incremented by :action-time
+   The act function receives (entity, game-map) and returns an action-result map
+   {:map updated-map, optional :time-cost, :no-time, :retry, :quit, :message, :look-mode}.
+   After acting, the entity's next-action is incremented by :time-cost
    if present, otherwise by its delay. If :no-time is set, no increment occurs."
   [tile-map entity]
   (if-let [act-fn (:act entity)]
-    (let [result-map (act-fn entity tile-map)
-          no-time? (:no-time result-map)
-          action-time (:action-time result-map)
-          clean-map (dissoc result-map :no-time :action-time :retry)
-          acted-entity (find-acted-entity (get-entities clean-map) entity)]
-      (if (and acted-entity (not no-time?))
-        (if action-time
-          (update-entity clean-map acted-entity increment-next-action action-time)
-          (update-entity clean-map acted-entity increment-next-action))
-        clean-map))
-    tile-map))
+    (let [result (act-fn entity tile-map)
+          {:keys [map no-time time-cost]} result
+          acted-entity (find-acted-entity (get-entities map) entity)
+          updated-map (if (and acted-entity (not no-time))
+                        (if time-cost
+                          (update-entity map acted-entity increment-next-action time-cost)
+                          (update-entity map acted-entity increment-next-action))
+                        map)]
+      (assoc result :map updated-map))
+    {:map tile-map}))
 
 (defn get-next-actor
   "Returns the entity with the lowest next-action value that can act, or nil if none."
@@ -383,23 +383,29 @@
        first))
 
 (defn process-next-actor
-  "Processes only the entity with the lowest next-action value."
+  "Processes only the entity with the lowest next-action value.
+   Returns an action-result map."
   [tile-map]
   (if-let [actor (get-next-actor tile-map)]
     (act-entity tile-map actor)
-    tile-map))
+    {:map tile-map}))
 
 (defn process-actors
-  "Processes all entities that have act functions."
+  "Processes all entities that have act functions.
+   Returns an action-result map with :map, and accumulated :quit/:message flags."
   [tile-map]
-  (reduce (fn [m entity]
-            (if (can-act? entity)
-              ;; Re-fetch entity from map in case it was modified
-              (if-let [current (first (filter #(= entity %) (get-entities m)))]
-                (act-entity m current)
-                m)
-              m))
-          tile-map
+  (reduce (fn [accum entity]
+            (let [current-map (:map accum)]
+              (if (can-act? entity)
+                ;; Re-fetch entity from map in case it was modified
+                (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
+                  (let [result (act-entity current-map current)]
+                    (cond-> {:map (:map result)}
+                      (or (:quit accum) (:quit result))       (assoc :quit true)
+                      (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))))
+                  accum)
+                accum)))
+          {:map tile-map}
           (get-entities tile-map)))
 
 ;; Player input handling
@@ -418,7 +424,8 @@
 
 (defn try-move
   "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable.
-   Sets :no-time and :retry flags if the move fails."
+   Returns an action-result: {:map updated-map} on success,
+   {:map game-map :no-time true :retry true} on failure."
   [game-map entity dx dy]
   (let [[x y] (entity-pos entity)
         new-x (+ x dx)
@@ -426,15 +433,11 @@
         in-map (in-bounds? game-map new-x new-y)
         can-walk (and in-map (walkable? entity (get-tile game-map new-x new-y)))]
     (if can-walk
-      (update-entity game-map entity move-entity-by dx dy)
-      (assoc game-map :no-time true :retry true))))
-
-(def no-time-actions
-  "Actions that don't consume a turn."
-  #{:look :quit})
+      {:map (update-entity game-map entity move-entity-by dx dy)}
+      {:map game-map :no-time true :retry true})))
 
 (defn execute-action
-  "Executes a player action, returning the updated game map.
+  "Executes a player action, returning an action-result map.
    Movement actions consume time; :look and :quit do not."
   [action entity game-map]
   (case action
@@ -446,15 +449,16 @@
     :move-up-right (try-move game-map entity 1 -1)
     :move-down-left (try-move game-map entity -1 1)
     :move-down-right (try-move game-map entity 1 1)
-    :look (assoc game-map :look-mode true :no-time true)
-    :quit (assoc game-map :quit true)
-    game-map))
+    :look {:map game-map :look-mode true :no-time true}
+    :quit {:map game-map :quit true}
+    {:map game-map}))
 
 (defn make-player-act
   "Creates a player act function that calls input-fn to get input.
    Optional key-map translates input keys to actions.
    Loops until an action that affects the world is performed.
-   Failed moves and unknown keys are retried immediately."
+   Failed moves and unknown keys are retried immediately.
+   Returns an action-result map."
   ([input-fn] (make-player-act input-fn default-key-map))
   ([input-fn key-map]
    (fn [entity game-map]
@@ -463,7 +467,7 @@
              action (get key-map input)
              result (if action
                       (execute-action action entity game-map)
-                      (assoc game-map :no-time true :retry true))]
+                      {:map game-map :no-time true :retry true})]
          (if (:retry result)
            (recur)
            result))))))
