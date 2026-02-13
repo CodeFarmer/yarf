@@ -85,7 +85,17 @@
     (core/create-entity :player \@ :yellow x y
                         {:act (core/make-player-act input-fn demo-key-map
                                                     {:registry registry
-                                                     :on-look-move on-look-move})})))
+                                                     :on-look-move on-look-move
+                                                     :look-bounds-fn
+                                                     (fn [game-map entity]
+                                                       (let [[px py] (core/entity-pos entity)
+                                                             vp (-> base-viewport
+                                                                    (display/center-viewport-on px py)
+                                                                    (display/clamp-to-map game-map))
+                                                             {:keys [offset-x offset-y width height]} vp]
+                                                         [offset-x offset-y
+                                                          (+ offset-x (dec width))
+                                                          (+ offset-y (dec height))]))})})))
 
 (defn create-wandering-goblin
   "Creates a goblin that wanders randomly."

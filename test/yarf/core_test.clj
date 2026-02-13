@@ -959,6 +959,57 @@
       (is (= [0 0] (first @calls)))
       (is (= [0 0] (second @calls)))))
 
+  (testing "cursor stays within supplied bounds"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          m (create-tile-map 50 50) ;; map much larger than bounds
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+          ;; Bounds: x 10-14, y 10-14 (5x5 window)
+          bounds [10 10 14 14]
+          ;; Start at 12,12, try to move right 3 times (should stop at x=14)
+          inputs (atom [\l \l \l :escape])]
+      (look-mode registry m 12 12
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move bounds)
+      ;; Initial(12,12) + right(13,12) + right(14,12) + stayed(14,12) = 4 calls
+      (is (= 4 (count @calls)))
+      (is (= [12 12] (nth @calls 0)))
+      (is (= [13 12] (nth @calls 1)))
+      (is (= [14 12] (nth @calls 2)))
+      (is (= [14 12] (nth @calls 3)))))
+
+  (testing "bounds intersects with map bounds"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          m (create-tile-map 10 10)
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+          ;; Bounds extend beyond map (map is 0-9, bounds say 0-20)
+          bounds [0 0 20 20]
+          ;; At 9,5, try to move right (blocked by map edge, not bounds)
+          inputs (atom [\l :escape])]
+      (look-mode registry m 9 5
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move bounds)
+      (is (= 2 (count @calls)))
+      (is (= [9 5] (first @calls)))
+      (is (= [9 5] (second @calls)))))
+
+  (testing "nil bounds uses only map bounds (backward compat)"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          m (create-tile-map 10 10)
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+          inputs (atom [\l :escape])]
+      (look-mode registry m 5 5
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move nil)
+      (is (= 2 (count @calls)))
+      (is (= [5 5] (first @calls)))
+      (is (= [6 5] (second @calls)))))
+
   (testing "shows entity info over tile info"
     (let [registry (-> (create-type-registry)
                        (define-entity-type :goblin {:name "Goblin" :description "A small goblin."})
@@ -999,6 +1050,31 @@
                 (add-entity player))
           result (act-fn player m)]
       (is (= 6 (first (entity-pos (get-player (:map result))))))))
+
+  (testing "look-bounds-fn constrains cursor in look mode"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor" :description "Stone floor."}))
+          ;; x enters look, move right 3 times (bounds stop at x=7), then Enter
+          inputs (atom [\x \l \l \l :enter])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          calls (atom [])
+          act-fn (make-player-act input-fn default-key-map
+                                  {:registry registry
+                                   :on-look-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+                                   :look-bounds-fn (fn [gm entity]
+                                                     (let [[px py] (entity-pos entity)]
+                                                       ;; player at 5,5; bounds 3-7 in each direction
+                                                       [(- px 2) (- py 2) (+ px 2) (+ py 2)]))})
+          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          m (-> (create-tile-map 50 50)
+                (add-entity player))
+          result (act-fn player m)]
+      ;; Cursor: 5,5 -> 6,5 -> 7,5 -> 7,5 (blocked) -> Enter
+      (is (= [5 5] (nth @calls 0)))
+      (is (= [6 5] (nth @calls 1)))
+      (is (= [7 5] (nth @calls 2)))
+      (is (= [7 5] (nth @calls 3)))
+      (is (= "Stone floor." (:message result)))))
 
   (testing "look mode escape returns to input loop"
     (let [registry (-> (create-type-registry)

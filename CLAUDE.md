@@ -135,16 +135,19 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
 **`make-player-act` opts:**
 - `:registry` - type registry for `look-at` (enables look mode)
 - `:on-look-move` - `(fn [game-map cx cy look-info])` callback called at initial cursor position and each move during look mode
+- `:look-bounds-fn` - `(fn [game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry; keeps core display-agnostic (it knows about a bounding rect, not viewports)
 - Without `:registry`, pressing look key is treated as unknown input (retried)
 
 **Look mode (`yarf.core`):**
 - `look-mode [registry game-map start-x start-y input-fn key-map on-move]` - self-contained cursor movement loop
+- `look-mode [registry game-map start-x start-y input-fn key-map on-move bounds]` - with optional bounds
 - Cursor starts at `(start-x, start-y)`, moves with directional keys (same key-map as player)
 - `on-move` callback: `(fn [game-map cx cy look-info])` - called at initial position and each cursor move
 - `look-info` is the result of `(look-at registry game-map cx cy)`
+- `bounds`: optional `[min-x min-y max-x max-y]` to constrain cursor movement (intersected with map bounds); nil = map bounds only
 - Enter: returns `{:map game-map :no-time true :message description}` (falls back to "You see {name}.")
 - Escape: returns `{:map game-map :no-time true}` (no message)
-- Cursor stays within map bounds; unknown keys are ignored
+- Cursor stays within bounds (and map bounds); unknown keys are ignored
 
 **Looking at objects (`yarf.core`):**
 - `get-name [registry instance]` - returns name (instance, type, or type-key as fallback)

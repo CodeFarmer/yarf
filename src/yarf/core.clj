@@ -530,45 +530,58 @@
     (try-move game-map entity dx dy)
     {:map game-map}))
 
+(defn- in-look-bounds?
+  "Returns true if (x, y) is within map bounds and optional look bounds."
+  [game-map bounds x y]
+  (and (in-bounds? game-map x y)
+       (if bounds
+         (let [[min-x min-y max-x max-y] bounds]
+           (and (>= x min-x) (<= x max-x)
+                (>= y min-y) (<= y max-y)))
+         true)))
+
 (defn look-mode
   "Enters look mode: cursor starts at (start-x, start-y), moves with directional keys.
    input-fn: blocking input function (returns key)
    key-map: maps keys to actions (uses direction-deltas for movement)
    on-move: (fn [game-map cx cy look-info]) called at initial position and each move
+   bounds: optional [min-x min-y max-x max-y] to constrain cursor (nil = map bounds only)
    Returns action-result:
      Enter  -> {:map game-map :no-time true :message description}
      Escape -> {:map game-map :no-time true}"
-  [registry game-map start-x start-y input-fn key-map on-move]
-  (loop [cx start-x
-         cy start-y]
-    (let [look-info (look-at registry game-map cx cy)]
-      (when on-move
-        (on-move game-map cx cy look-info))
-      (let [input (input-fn)
-            action (get key-map input)]
-        (cond
-          ;; Enter: return description
-          (= input :enter)
-          {:map game-map :no-time true
-           :message (or (:description look-info)
-                        (str "You see " (:name look-info) "."))}
+  ([registry game-map start-x start-y input-fn key-map on-move]
+   (look-mode registry game-map start-x start-y input-fn key-map on-move nil))
+  ([registry game-map start-x start-y input-fn key-map on-move bounds]
+   (loop [cx start-x
+          cy start-y]
+     (let [look-info (look-at registry game-map cx cy)]
+       (when on-move
+         (on-move game-map cx cy look-info))
+       (let [input (input-fn)
+             action (get key-map input)]
+         (cond
+           ;; Enter: return description
+           (= input :enter)
+           {:map game-map :no-time true
+            :message (or (:description look-info)
+                         (str "You see " (:name look-info) "."))}
 
-          ;; Escape: cancel
-          (= input :escape)
-          {:map game-map :no-time true}
+           ;; Escape: cancel
+           (= input :escape)
+           {:map game-map :no-time true}
 
-          ;; Movement: move cursor if in bounds
-          (direction-deltas action)
-          (let [[dx dy] (direction-deltas action)
-                nx (+ cx dx)
-                ny (+ cy dy)]
-            (if (in-bounds? game-map nx ny)
-              (recur nx ny)
-              (recur cx cy)))
+           ;; Movement: move cursor if in bounds
+           (direction-deltas action)
+           (let [[dx dy] (direction-deltas action)
+                 nx (+ cx dx)
+                 ny (+ cy dy)]
+             (if (in-look-bounds? game-map bounds nx ny)
+               (recur nx ny)
+               (recur cx cy)))
 
-          ;; Unknown key: ignore
-          :else
-          (recur cx cy))))))
+           ;; Unknown key: ignore
+           :else
+           (recur cx cy)))))))
 
 (defn make-player-act
   "Creates a player act function that calls input-fn to get input.
@@ -594,8 +607,10 @@
            ;; Look mode with opts
            (and (= action :look) (:registry opts))
            (let [[px py] (entity-pos entity)
+                 bounds (when-let [bounds-fn (:look-bounds-fn opts)]
+                          (bounds-fn game-map entity))
                  result (look-mode (:registry opts) game-map px py
-                                   input-fn key-map (:on-look-move opts))]
+                                   input-fn key-map (:on-look-move opts) bounds)]
              (if (:message result)
                result
                (recur)))
