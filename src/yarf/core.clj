@@ -221,6 +221,86 @@
       (make-corridor 9 5 15 7)
       (make-corridor 10 14 10 20)))
 
+;; Field of View (shadow casting)
+
+(defn- scan-octant
+  "Scans one octant for shadow casting FOV.
+   transform-fn maps (row, col) to (dx, dy) relative to origin.
+   Adds visible [x y] coords to the visible set atom."
+  [game-map ox oy radius transform-fn visible]
+  (let [max-dist (or radius (max (map-width game-map) (map-height game-map)))]
+    (loop [row 1
+           shadows []]
+      (when (<= row max-dist)
+        (let [done (volatile! false)
+              any-in-bounds (volatile! false)
+              new-shadows (volatile! shadows)]
+          (loop [col 0]
+            (when (and (not @done) (<= col row))
+              (let [[dx dy] (transform-fn row col)
+                    x (+ ox dx)
+                    y (+ oy dy)]
+                (if (not (in-bounds? game-map x y))
+                  (recur (inc col))
+                  (let [start-slope (/ (- col 0.5) row)
+                        center-slope (/ (double col) row)
+                        end-slope (/ (+ col 0.5) row)
+                        in-shadow (some (fn [[s e]] (and (>= center-slope s) (<= center-slope e)))
+                                        @new-shadows)
+                        opaque (not (transparent? (get-tile game-map x y)))]
+                    (vreset! any-in-bounds true)
+                    (when-not in-shadow
+                      (swap! visible conj [x y]))
+                    (when (and opaque (not in-shadow))
+                      (let [new-shadow [start-slope end-slope]
+                            merged (reduce (fn [acc [ss se :as s]]
+                                             (let [prev (peek acc)]
+                                               (if (and prev (<= (first prev) ss) (>= (second prev) ss))
+                                                 (conj (pop acc) [(first prev) (max (second prev) se)])
+                                                 (conj acc s))))
+                                           []
+                                           (sort-by first (conj @new-shadows new-shadow)))]
+                        (vreset! new-shadows merged)
+                        (when (and (seq merged)
+                                   (<= (first (first merged)) 0.0)
+                                   (>= (second (last merged)) 1.0))
+                          (vreset! done true))))
+                    (recur (inc col)))))))
+          (when (and (not @done) @any-in-bounds)
+            (recur (inc row) @new-shadows)))))))
+
+(def ^:private octant-transforms
+  "Transform functions for 8 octants. Each maps (row, col) to (dx, dy)."
+  [(fn [row col] [row (- col)])
+   (fn [row col] [col (- row)])
+   (fn [row col] [(- col) (- row)])
+   (fn [row col] [(- row) (- col)])
+   (fn [row col] [(- row) col])
+   (fn [row col] [(- col) row])
+   (fn [row col] [col row])
+   (fn [row col] [row col])])
+
+(defn compute-fov
+  "Computes field of view from origin (ox, oy) using shadow casting.
+   Optional radius limits visible distance (Chebyshev distance).
+   Returns a set of visible [x y] coordinate pairs."
+  ([game-map ox oy] (compute-fov game-map ox oy nil))
+  ([game-map ox oy radius]
+   (let [visible (atom #{[ox oy]})]
+     (doseq [transform octant-transforms]
+       (scan-octant game-map ox oy radius transform visible))
+     @visible)))
+
+(defn compute-entity-fov
+  "Computes field of view for an entity using its position and view-radius.
+   If entity has no view-radius, computes unlimited FOV."
+  [game-map entity]
+  (let [[x y] (:pos entity)
+        r (:view-radius entity)]
+    (if r
+      (compute-fov game-map x y r)
+      (compute-fov game-map x y))))
+
 ;; Entities
 
 (defn create-entity

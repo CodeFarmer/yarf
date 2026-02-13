@@ -1015,6 +1015,140 @@
       ;; Escape from look mode -> recurs -> moves right
       (is (= 6 (first (entity-pos (get-player (:map result)))))))))
 
+;; FOV tests
+
+(deftest compute-fov-basic-test
+  (testing "origin is always visible"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 5 5)]
+      (is (contains? fov [5 5]))))
+  (testing "returns a set of coordinate pairs"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 5 5)]
+      (is (set? fov))
+      (is (every? #(and (vector? %) (= 2 (count %))) fov))))
+  (testing "open map has all tiles visible"
+    (let [m (create-tile-map 5 5)
+          fov (compute-fov m 2 2)]
+      ;; All 25 tiles should be visible on an open 5x5 map
+      (is (= 25 (count fov)))
+      (doseq [x (range 5) y (range 5)]
+        (is (contains? fov [x y]))))))
+
+(deftest compute-fov-walls-test
+  (testing "wall blocks tiles behind it"
+    (let [m (-> (create-tile-map 10 10)
+                (set-tile 5 3 wall-tile))
+          fov (compute-fov m 5 5)]
+      ;; Wall itself is visible
+      (is (contains? fov [5 3]))
+      ;; Tile directly behind wall is not visible
+      (is (not (contains? fov [5 2])))))
+  (testing "wall doesn't block adjacent columns"
+    (let [m (-> (create-tile-map 10 10)
+                (set-tile 5 3 wall-tile))
+          fov (compute-fov m 5 5)]
+      ;; Adjacent tiles should still be visible
+      (is (contains? fov [4 3]))
+      (is (contains? fov [6 3]))))
+  (testing "room interior is visible, outside walls is not"
+    (let [m (-> (create-tile-map 20 20)
+                (fill-rect 0 0 20 20 wall-tile)
+                (make-room 5 5 10 10))
+          ;; Player at center of room (interior is 6,6 to 13,13)
+          fov (compute-fov m 10 10)]
+      ;; Interior floor visible
+      (is (contains? fov [8 8]))
+      (is (contains? fov [12 12]))
+      ;; Walls visible
+      (is (contains? fov [5 5]))
+      ;; Outside walls not visible
+      (is (not (contains? fov [3 3]))))))
+
+(deftest compute-fov-radius-test
+  (testing "radius limits visible distance"
+    (let [m (create-tile-map 20 20)
+          fov (compute-fov m 10 10 3)]
+      ;; Tiles within radius are visible
+      (is (contains? fov [10 10]))
+      (is (contains? fov [10 7]))
+      (is (contains? fov [13 10]))
+      ;; Tiles beyond radius are not visible
+      (is (not (contains? fov [10 5])))
+      (is (not (contains? fov [15 10])))))
+  (testing "radius 0 shows only origin"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 5 5 0)]
+      (is (= #{[5 5]} fov))))
+  (testing "radius 1 shows immediate neighbors"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 5 5 1)]
+      (is (contains? fov [5 5]))
+      (is (contains? fov [5 4]))
+      (is (contains? fov [5 6]))
+      (is (contains? fov [4 5]))
+      (is (contains? fov [6 5]))
+      ;; Should not include tiles at distance 2
+      (is (not (contains? fov [5 3])))
+      (is (not (contains? fov [5 7]))))))
+
+(deftest compute-fov-edge-cases-test
+  (testing "corner origin works correctly"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 0 0)]
+      (is (contains? fov [0 0]))
+      (is (contains? fov [1 0]))
+      (is (contains? fov [0 1]))))
+  (testing "edge origin works correctly"
+    (let [m (create-tile-map 10 10)
+          fov (compute-fov m 9 5)]
+      (is (contains? fov [9 5]))
+      (is (contains? fov [8 5]))))
+  (testing "closed doors block vision"
+    (let [m (-> (create-tile-map 10 10)
+                (set-tile 5 3 door-closed-tile))
+          fov (compute-fov m 5 5)]
+      (is (contains? fov [5 3]))
+      (is (not (contains? fov [5 2])))))
+  (testing "open doors don't block vision"
+    (let [m (-> (create-tile-map 10 10)
+                (set-tile 5 3 door-open-tile))
+          fov (compute-fov m 5 5)]
+      (is (contains? fov [5 3]))
+      (is (contains? fov [5 2]))))
+  (testing "water doesn't block vision"
+    (let [m (-> (create-tile-map 10 10)
+                (set-tile 5 3 water-tile))
+          fov (compute-fov m 5 5)]
+      (is (contains? fov [5 3]))
+      (is (contains? fov [5 2])))))
+
+(deftest entity-view-radius-test
+  (testing "returns view-radius when set"
+    (let [e (create-entity :player \@ :yellow 5 5 {:view-radius 8})]
+      (is (= 8 (:view-radius e)))))
+  (testing "returns nil when not set"
+    (let [e (create-entity :player \@ :yellow 5 5)]
+      (is (nil? (:view-radius e))))))
+
+(deftest compute-entity-fov-test
+  (testing "uses entity position and view-radius"
+    (let [e (create-entity :player \@ :yellow 5 5 {:view-radius 3})
+          m (-> (create-tile-map 20 20)
+                (add-entity e))
+          fov (compute-entity-fov m e)]
+      (is (contains? fov [5 5]))
+      (is (contains? fov [5 2]))
+      (is (not (contains? fov [5 0])))))
+  (testing "unlimited when no view-radius"
+    (let [e (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity e))
+          fov (compute-entity-fov m e)]
+      ;; All open tiles should be visible
+      (is (contains? fov [0 0]))
+      (is (contains? fov [9 9])))))
+
 (deftest make-player-act-quit-test
   (testing "quit action works in updated make-player-act"
     (let [inputs (atom [\q])

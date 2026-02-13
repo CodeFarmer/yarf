@@ -206,6 +206,10 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 
+## Style
+
+- **No trivial getter functions.** Entities and tiles are plain maps — access fields directly with keywords (e.g. `(:view-radius entity)`) rather than writing wrapper functions that just retrieve a single field. Only create accessor functions when they provide real value (default values, computed results, or polymorphic behavior).
+
 ## Development Notes
 
 - Clojure version: 1.10.3
