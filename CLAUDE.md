@@ -167,6 +167,13 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `make-corridor [map x1 y1 x2 y2]` - L-shaped corridor
 - `generate-test-map [width height]` - sample map for testing
 
+### Field of View (`yarf.core`)
+
+Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed doors) are visible but block tiles behind them. Uses `transparent?` for opacity and **Chebyshev distance** for radius (square-shaped FOV).
+
+- `compute-fov [map ox oy]` or `[map ox oy radius]` - returns `#{[x y] ...}` set of visible coordinates from origin; nil radius = unlimited (bounded by map size)
+- `compute-entity-fov [map entity]` - uses entity's `:pos` and `:view-radius` (nil = unlimited)
+
 ### Display (`yarf.display`)
 
 **Display protocol:**
