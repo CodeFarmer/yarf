@@ -22,8 +22,9 @@
       (core/define-tile-type :water {:name "Water" :description "Dark, still water."})))
 
 (defn render-game
-  "Renders the game to the screen."
-  [screen game-map viewport message]
+  "Renders the game to the screen. fov is the set of currently visible coords,
+   explored is the set of previously seen coords."
+  [screen game-map viewport message fov explored]
   (s/clear screen)
   (let [{:keys [width height offset-x offset-y]} viewport]
     ;; Render tiles
@@ -33,14 +34,20 @@
             wy (+ sy offset-y)]
         (when (core/in-bounds? game-map wx wy)
           (let [tile (core/get-tile game-map wx wy)]
-            (s/put-string screen sx sy (str (core/tile-char tile))
-                          {:fg (core/tile-color tile)})))))
-    ;; Render entities
+            (cond
+              (fov [wx wy])
+              (s/put-string screen sx sy (str (core/tile-char tile))
+                            {:fg (core/tile-color tile)})
+              (explored [wx wy])
+              (s/put-string screen sx sy (str (core/tile-char tile))
+                            {:fg :blue}))))))
+    ;; Render entities (only if in FOV)
     (doseq [entity (core/get-entities game-map)]
       (let [[wx wy] (core/entity-pos entity)
             sx (- wx offset-x)
             sy (- wy offset-y)]
-        (when (and (>= sx 0) (< sx width)
+        (when (and (fov [wx wy])
+                   (>= sx 0) (< sx width)
                    (>= sy 0) (< sy height))
           (s/put-string screen sx sy (str (core/entity-char entity))
                         {:fg (core/entity-color entity)}))))
@@ -59,12 +66,12 @@
 
 (defn render-look-frame
   "Renders the game with a highlighted cursor at (cx, cy) and look info in message bar."
-  [screen game-map viewport cx cy look-info]
+  [screen game-map viewport cx cy look-info fov explored]
   (let [{:keys [width height offset-x offset-y]} viewport
         sx (- cx offset-x)
         sy (- cy offset-y)]
     ;; Render normal game frame with look name as message
-    (render-game screen game-map viewport (:name look-info))
+    (render-game screen game-map viewport (:name look-info) fov explored)
     ;; Position cursor on examined square
     (when (and (>= sx 0) (< sx width)
                (>= sy 0) (< sy height))
@@ -73,15 +80,16 @@
 
 (defn create-demo-player
   "Creates a player for the demo with vi-style movement, quit, look mode."
-  [x y screen registry base-viewport]
+  [x y screen registry base-viewport explored-atom]
   (let [input-fn #(s/get-key-blocking screen)
         on-look-move (fn [game-map cx cy look-info]
-                       (let [vp (-> base-viewport
-                                    (display/center-viewport-on
-                                     (first (core/entity-pos (core/get-player game-map)))
-                                     (second (core/entity-pos (core/get-player game-map))))
-                                    (display/clamp-to-map game-map))]
-                         (render-look-frame screen game-map vp cx cy look-info)))]
+                       (let [player (core/get-player game-map)
+                             [px py] (core/entity-pos player)
+                             vp (-> base-viewport
+                                    (display/center-viewport-on px py)
+                                    (display/clamp-to-map game-map))
+                             fov (core/compute-entity-fov game-map player)]
+                         (render-look-frame screen game-map vp cx cy look-info fov @explored-atom)))]
     (core/create-entity :player \@ :yellow x y
                         {:act (core/make-player-act input-fn demo-key-map
                                                     {:registry registry
@@ -108,9 +116,9 @@
 
 (defn create-demo-game
   "Creates a demo game state."
-  [screen registry viewport]
+  [screen registry viewport explored-atom]
   (-> (core/generate-test-map 60 40)
-      (core/add-entity (create-demo-player 5 5 screen registry viewport))
+      (core/add-entity (create-demo-player 5 5 screen registry viewport explored-atom))
       (core/add-entity (create-wandering-goblin 18 6))
       (core/add-entity (create-wandering-goblin 8 18))))
 
@@ -126,11 +134,14 @@
 
 (defn game-loop
   "Main game loop."
-  [screen initial-map viewport]
+  [screen initial-map viewport explored-atom]
   (loop [game-map initial-map
          message nil]
-    (let [vp (center-viewport-on-player game-map viewport)]
-      (render-game screen game-map vp message)
+    (let [player (core/get-player game-map)
+          fov (core/compute-entity-fov game-map player)
+          _ (swap! explored-atom into fov)
+          vp (center-viewport-on-player game-map viewport)]
+      (render-game screen game-map vp message fov @explored-atom)
       (let [result (core/process-actors game-map)
             {:keys [map quit message]} result]
         (if quit
@@ -152,8 +163,9 @@
         registry (create-demo-registry)]
     (s/start screen)
     (try
-      (let [game-map (create-demo-game screen registry viewport)]
-        (game-loop screen game-map viewport))
+      (let [explored-atom (atom #{})
+            game-map (create-demo-game screen registry viewport explored-atom)]
+        (game-loop screen game-map viewport explored-atom))
       (finally
         (s/stop screen))))
   (println "Demo ended."))

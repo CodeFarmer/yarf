@@ -215,6 +215,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Terminal cursor tracks the player; in look mode it tracks the examined square
 - Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
+- FOV/fog of war: visible tiles in color, explored tiles in blue, unexplored black; entities hidden outside FOV
+- Explored state is an `atom` shared between `game-loop` and the player's `on-look-move` closure. This is a pragmatic workaround: the act function signature `(entity, game-map)` provides no way to thread display-only state into callbacks. Revisit if the act interface gains an extensible context parameter or if explored state moves into core.
 
 ## Style
 
@@ -223,6 +225,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 ## TODO
 
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
+- Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
+- Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
 
 ## Development Notes
 
