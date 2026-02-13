@@ -96,7 +96,6 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
  :retry      true            ;; action had no effect, retry input
  :quit       true            ;; game should exit
  :message    "text"          ;; display to player
- :look-mode  true            ;; enter look mode
 }
 ```
 
@@ -104,7 +103,7 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
 - `act-entity [map entity]` - calls entity's act fn, processes timing, returns action-result
 - `process-actors [map]` - processes all actors, returns action-result with accumulated flags
 - `process-next-actor [map]` - processes next actor, returns action-result
-- `make-player-act [input-fn]` or `[input-fn key-map]` - creates player act fn (returns action-result)
+- `make-player-act [input-fn]` or `[input-fn key-map]` or `[input-fn key-map opts]` - creates player act fn (returns action-result)
 
 **Action timing:**
 - `entity-delay` - default ticks between actions (default 10). Lower = faster.
@@ -115,7 +114,8 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
 
 **Key mappings (`yarf.core`):**
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal, `x` look
-- `execute-action [action entity map]` - executes `:move-*`, `:look`, `:quit`; returns action-result
+- `direction-deltas` - maps movement actions to `[dx dy]` vectors (e.g. `:move-up` -> `[0 -1]`)
+- `execute-action [action entity map]` - executes movement actions via `direction-deltas`; returns action-result
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
@@ -129,7 +129,22 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
 **Input retry behavior:**
 - `make-player-act` loops until an action that affects the world is performed
 - Failed moves and unknown keys are retried immediately without consuming time
-- Valid actions (successful moves, look, quit) exit the loop
+- Valid actions (successful moves, quit) exit the loop
+- `:look` and `:quit` are handled in `make-player-act`, not in `execute-action`
+
+**`make-player-act` opts:**
+- `:registry` - type registry for `look-at` (enables look mode)
+- `:on-look-move` - `(fn [game-map cx cy look-info])` callback called at initial cursor position and each move during look mode
+- Without `:registry`, pressing look key is treated as unknown input (retried)
+
+**Look mode (`yarf.core`):**
+- `look-mode [registry game-map start-x start-y input-fn key-map on-move]` - self-contained cursor movement loop
+- Cursor starts at `(start-x, start-y)`, moves with directional keys (same key-map as player)
+- `on-move` callback: `(fn [game-map cx cy look-info])` - called at initial position and each cursor move
+- `look-info` is the result of `(look-at registry game-map cx cy)`
+- Enter: returns `{:map game-map :no-time true :message description}` (falls back to "You see {name}.")
+- Escape: returns `{:map game-map :no-time true}` (no message)
+- Cursor stays within map bounds; unknown keys are ignored
 
 **Looking at objects (`yarf.core`):**
 - `get-name [registry instance]` - returns name (instance, type, or type-key as fallback)
@@ -143,7 +158,6 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:no-time` - action doesn't increment `next-action`
 - `:time-cost N` - action takes N ticks instead of entity's delay
 - `:retry` - action had no effect, poll for new input (used with `:no-time`)
-- `:look-mode` - signals entry to look mode
 - `:quit` - signals game should exit
 
 ### Map Generation (`yarf.core`)
@@ -184,7 +198,9 @@ The `:map` key always contains the game map (clean, no flags embedded).
 Simple game loop demonstrating the framework. Run with `lein run`.
 
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
+- `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
 - Player and two wandering goblins
+- Type registry with tile/entity names and descriptions
 - Viewport follows player
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 

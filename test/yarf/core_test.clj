@@ -857,11 +857,172 @@
           info (look-at registry m 5 5)]
       (is (= "Goblin" (:name info))))))
 
-(deftest look-action-no-time-test
-  (testing "look action does not increment next-action"
-    (let [player (create-entity :player \@ :yellow 5 5 {:next-action 0 :delay 10})
+(deftest execute-action-movement-only-test
+  (testing "execute-action handles movement via direction-deltas"
+    (let [player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
-          result (execute-action :look player m)
-          updated (get-player (:map result))]
-      (is (= 0 (entity-next-action updated))))))
+          result (execute-action :move-up player m)]
+      (is (= 4 (second (entity-pos (get-player (:map result))))))))
+  (testing "execute-action returns unchanged map for unknown actions"
+    (let [player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          result (execute-action :look player m)]
+      (is (= m (:map result)))
+      (is (nil? (:look-mode result))))))
+
+(deftest direction-deltas-test
+  (testing "direction-deltas has all 8 directions"
+    (is (= [0 -1] (direction-deltas :move-up)))
+    (is (= [0 1] (direction-deltas :move-down)))
+    (is (= [-1 0] (direction-deltas :move-left)))
+    (is (= [1 0] (direction-deltas :move-right)))
+    (is (= [-1 -1] (direction-deltas :move-up-left)))
+    (is (= [1 -1] (direction-deltas :move-up-right)))
+    (is (= [-1 1] (direction-deltas :move-down-left)))
+    (is (= [1 1] (direction-deltas :move-down-right)))))
+
+(deftest look-mode-test
+  (testing "look-mode calls on-move with initial position"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
+          m (create-tile-map 10 10)
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy (:name info)]))
+          inputs (atom [:escape])]
+      (look-mode registry m 5 5
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move)
+      (is (= 1 (count @calls)))
+      (is (= [5 5 "Stone Floor"] (first @calls)))))
+
+  (testing "cursor moves with directional input"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          m (create-tile-map 10 10)
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+          inputs (atom [\l \j :escape])]
+      (look-mode registry m 5 5
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move)
+      ;; Initial + 2 moves = 3 calls
+      (is (= 3 (count @calls)))
+      (is (= [5 5] (nth @calls 0)))
+      (is (= [6 5] (nth @calls 1)))
+      (is (= [6 6] (nth @calls 2)))))
+
+  (testing "returns description on Enter"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
+          m (create-tile-map 10 10)
+          inputs (atom [:enter])
+          result (look-mode registry m 5 5
+                           #(let [i (first @inputs)] (swap! inputs rest) i)
+                           default-key-map nil)]
+      (is (= "Cold grey stone." (:message result)))
+      (is (:no-time result))))
+
+  (testing "returns fallback message on Enter when no description"
+    (let [registry (create-type-registry)
+          m (create-tile-map 10 10)
+          inputs (atom [:enter])
+          result (look-mode registry m 5 5
+                           #(let [i (first @inputs)] (swap! inputs rest) i)
+                           default-key-map nil)]
+      (is (= "You see floor." (:message result)))))
+
+  (testing "returns no message on Escape"
+    (let [registry (create-type-registry)
+          m (create-tile-map 10 10)
+          inputs (atom [:escape])
+          result (look-mode registry m 5 5
+                           #(let [i (first @inputs)] (swap! inputs rest) i)
+                           default-key-map nil)]
+      (is (nil? (:message result)))
+      (is (:no-time result))))
+
+  (testing "cursor stays in bounds"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          m (create-tile-map 10 10)
+          calls (atom [])
+          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
+          ;; At 0,0 try to go up-left (should stay), then escape
+          inputs (atom [\y :escape])]
+      (look-mode registry m 0 0
+                 #(let [i (first @inputs)] (swap! inputs rest) i)
+                 default-key-map on-move)
+      ;; Initial + stayed = 2 calls, both at 0,0
+      (is (= 2 (count @calls)))
+      (is (= [0 0] (first @calls)))
+      (is (= [0 0] (second @calls)))))
+
+  (testing "shows entity info over tile info"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin" :description "A small goblin."})
+                       (define-tile-type :floor {:name "Floor" :description "Stone floor."}))
+          goblin (create-entity :goblin \g :green 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          inputs (atom [:enter])
+          result (look-mode registry m 5 5
+                           #(let [i (first @inputs)] (swap! inputs rest) i)
+                           default-key-map nil)]
+      (is (= "A small goblin." (:message result))))))
+
+(deftest make-player-act-look-mode-test
+  (testing "with opts: enters look mode on x, returns message on Enter"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:name "Player" :description "That's you."})
+                       (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
+          ;; x enters look mode, then move right (away from player), then Enter selects tile
+          inputs (atom [\x \l :enter])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          act-fn (make-player-act input-fn default-key-map
+                                  {:registry registry})
+          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          result (act-fn player m)]
+      (is (= "Cold grey stone." (:message result)))
+      (is (:no-time result))))
+
+  (testing "without opts: look is ignored, continues to next input"
+    (let [;; x (look, ignored), then l (move right)
+          inputs (atom [\x \l])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          act-fn (make-player-act input-fn default-key-map)
+          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          result (act-fn player m)]
+      (is (= 6 (first (entity-pos (get-player (:map result))))))))
+
+  (testing "look mode escape returns to input loop"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Floor"}))
+          ;; x enters look, escape cancels, then l moves
+          inputs (atom [\x :escape \l])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          act-fn (make-player-act input-fn default-key-map
+                                  {:registry registry})
+          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          result (act-fn player m)]
+      ;; Escape from look mode -> recurs -> moves right
+      (is (= 6 (first (entity-pos (get-player (:map result)))))))))
+
+(deftest make-player-act-quit-test
+  (testing "quit action works in updated make-player-act"
+    (let [inputs (atom [\q])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          key-map (assoc default-key-map \q :quit)
+          act-fn (make-player-act input-fn key-map)
+          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          result (act-fn player m)]
+      (is (:quit result)))))

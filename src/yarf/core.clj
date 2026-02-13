@@ -358,7 +358,7 @@
 (defn act-entity
   "Calls the entity's act function if it has one.
    The act function receives (entity, game-map) and returns an action-result map
-   {:map updated-map, optional :time-cost, :no-time, :retry, :quit, :message, :look-mode}.
+   {:map updated-map, optional :time-cost, :no-time, :retry, :quit, :message}.
    After acting, the entity's next-action is incremented by :time-cost
    if present, otherwise by its delay. If :no-time is set, no increment occurs."
   [tile-map entity]
@@ -436,38 +436,101 @@
       {:map (update-entity game-map entity move-entity-by dx dy)}
       {:map game-map :no-time true :retry true})))
 
+(def direction-deltas
+  "Maps movement actions to [dx dy] vectors."
+  {:move-up [0 -1] :move-down [0 1] :move-left [-1 0] :move-right [1 0]
+   :move-up-left [-1 -1] :move-up-right [1 -1]
+   :move-down-left [-1 1] :move-down-right [1 1]})
+
 (defn execute-action
-  "Executes a player action, returning an action-result map.
-   Movement actions consume time; :look and :quit do not."
+  "Executes a world action (movement), returning an action-result map.
+   Player-only actions (:look, :quit) are handled in make-player-act."
   [action entity game-map]
-  (case action
-    :move-up (try-move game-map entity 0 -1)
-    :move-down (try-move game-map entity 0 1)
-    :move-left (try-move game-map entity -1 0)
-    :move-right (try-move game-map entity 1 0)
-    :move-up-left (try-move game-map entity -1 -1)
-    :move-up-right (try-move game-map entity 1 -1)
-    :move-down-left (try-move game-map entity -1 1)
-    :move-down-right (try-move game-map entity 1 1)
-    :look {:map game-map :look-mode true :no-time true}
-    :quit {:map game-map :quit true}
+  (if-let [[dx dy] (direction-deltas action)]
+    (try-move game-map entity dx dy)
     {:map game-map}))
+
+(defn look-mode
+  "Enters look mode: cursor starts at (start-x, start-y), moves with directional keys.
+   input-fn: blocking input function (returns key)
+   key-map: maps keys to actions (uses direction-deltas for movement)
+   on-move: (fn [game-map cx cy look-info]) called at initial position and each move
+   Returns action-result:
+     Enter  -> {:map game-map :no-time true :message description}
+     Escape -> {:map game-map :no-time true}"
+  [registry game-map start-x start-y input-fn key-map on-move]
+  (loop [cx start-x
+         cy start-y]
+    (let [look-info (look-at registry game-map cx cy)]
+      (when on-move
+        (on-move game-map cx cy look-info))
+      (let [input (input-fn)
+            action (get key-map input)]
+        (cond
+          ;; Enter: return description
+          (= input :enter)
+          {:map game-map :no-time true
+           :message (or (:description look-info)
+                        (str "You see " (:name look-info) "."))}
+
+          ;; Escape: cancel
+          (= input :escape)
+          {:map game-map :no-time true}
+
+          ;; Movement: move cursor if in bounds
+          (direction-deltas action)
+          (let [[dx dy] (direction-deltas action)
+                nx (+ cx dx)
+                ny (+ cy dy)]
+            (if (in-bounds? game-map nx ny)
+              (recur nx ny)
+              (recur cx cy)))
+
+          ;; Unknown key: ignore
+          :else
+          (recur cx cy))))))
 
 (defn make-player-act
   "Creates a player act function that calls input-fn to get input.
    Optional key-map translates input keys to actions.
+   Optional opts map supports:
+     :registry     - type registry for look-at (enables look mode)
+     :on-look-move - (fn [game-map cx cy look-info]) called during look mode
    Loops until an action that affects the world is performed.
    Failed moves and unknown keys are retried immediately.
    Returns an action-result map."
   ([input-fn] (make-player-act input-fn default-key-map))
-  ([input-fn key-map]
+  ([input-fn key-map] (make-player-act input-fn key-map nil))
+  ([input-fn key-map opts]
    (fn [entity game-map]
      (loop []
        (let [input (input-fn)
-             action (get key-map input)
-             result (if action
-                      (execute-action action entity game-map)
-                      {:map game-map :no-time true :retry true})]
-         (if (:retry result)
+             action (get key-map input)]
+         (cond
+           ;; Quit
+           (= action :quit)
+           {:map game-map :quit true}
+
+           ;; Look mode with opts
+           (and (= action :look) (:registry opts))
+           (let [[px py] (entity-pos entity)
+                 result (look-mode (:registry opts) game-map px py
+                                   input-fn key-map (:on-look-move opts))]
+             (if (:message result)
+               result
+               (recur)))
+
+           ;; Look without opts - retry
+           (= action :look)
            (recur)
-           result))))))
+
+           ;; World action (movement etc.)
+           action
+           (let [result (execute-action action entity game-map)]
+             (if (:retry result)
+               (recur)
+               result))
+
+           ;; Unknown key
+           :else
+           (recur)))))))
