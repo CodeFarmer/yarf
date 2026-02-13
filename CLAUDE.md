@@ -202,6 +202,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Player and two wandering goblins
 - Type registry with tile/entity names and descriptions
 - Viewport follows player
+- Terminal cursor tracks the player; in look mode it tracks the examined square
+- Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 
 ## Development Notes
