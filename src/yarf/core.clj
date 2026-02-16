@@ -1,4 +1,8 @@
-(ns yarf.core)
+(ns yarf.core
+  (:require [clojure.edn :as edn])
+  (:import [java.io PushbackReader InputStreamReader OutputStreamWriter
+            BufferedReader BufferedWriter FileInputStream FileOutputStream]
+           [java.util.zip GZIPInputStream GZIPOutputStream]))
 
 ;; Type registry
 ;; Types define shared immutable properties for entities and tiles (description, lore, etc.)
@@ -584,12 +588,12 @@
              (recur cx cy))))))))
 
 (defn player-act
-  "Player act function. Reads :input-fn, :key-map, :registry, :look-bounds-fn from ctx.
-   Loops until an action that affects the world is performed.
-   Failed moves and unknown keys are retried immediately.
+  "Player act function. Reads :input-fn, :key-map, :registry, :look-bounds-fn,
+   :pass-through-actions from ctx. Loops until an action that affects the world
+   is performed. Failed moves and unknown keys are retried immediately.
    Returns an action-result map."
   [entity game-map ctx]
-  (let [{:keys [input-fn key-map registry look-bounds-fn]} ctx]
+  (let [{:keys [input-fn key-map registry look-bounds-fn pass-through-actions]} ctx]
     (loop []
       (let [input (input-fn)
             action (get key-map input)]
@@ -612,6 +616,10 @@
           (= action :look)
           (recur)
 
+          ;; Pass-through actions (game-loop handles these)
+          (and pass-through-actions (contains? pass-through-actions action))
+          {:map game-map :no-time true :action action}
+
           ;; World action (movement etc.)
           action
           (let [result (execute-action action entity game-map)]
@@ -622,3 +630,55 @@
           ;; Unknown key
           :else
           (recur))))))
+
+;; Save/Load
+
+(defn restore-act-functions
+  "Restores :act functions on entities from the type registry.
+   Each entity's :type is looked up in the registry; if an :act property
+   is found, it's assoc'd onto the entity."
+  [game-map registry]
+  (update game-map :entities
+    (fn [entities]
+      (mapv (fn [entity]
+              (if-let [act-fn (get-type-property registry :entity (:type entity) :act)]
+                (assoc entity :act act-fn)
+                entity))
+            entities))))
+
+(defn prepare-save-data
+  "Prepares game state for saving. Strips :act from entities and adds version.
+   save-state is a map of additional keys to include (e.g. :explored, :viewport)."
+  [game-map save-state]
+  (let [stripped (update game-map :entities (fn [es] (mapv #(dissoc % :act) es)))]
+    (merge {:version 1 :game-map stripped} save-state)))
+
+(defn restore-save-data
+  "Restores save data by re-attaching act functions from the registry.
+   Throws on unsupported version."
+  [save-data registry]
+  (when-not (= 1 (:version save-data))
+    (throw (ex-info (str "Unsupported save version: " (:version save-data))
+                    {:version (:version save-data)})))
+  (update save-data :game-map restore-act-functions registry))
+
+(defn save-game
+  "Saves game state to a gzipped EDN file."
+  [file-path game-map save-state]
+  (let [save-data (prepare-save-data game-map save-state)]
+    (with-open [out (-> (FileOutputStream. ^String file-path)
+                        (GZIPOutputStream.)
+                        (OutputStreamWriter. "UTF-8")
+                        (BufferedWriter.))]
+      (.write out (pr-str save-data)))))
+
+(defn load-game
+  "Loads game state from a gzipped EDN file, restoring act functions from registry."
+  [file-path registry]
+  (let [save-data (with-open [in (-> (FileInputStream. ^String file-path)
+                                     (GZIPInputStream.)
+                                     (InputStreamReader. "UTF-8")
+                                     (BufferedReader.)
+                                     (PushbackReader.))]
+                    (edn/read in))]
+    (restore-save-data save-data registry)))

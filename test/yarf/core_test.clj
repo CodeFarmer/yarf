@@ -1,5 +1,6 @@
 (ns yarf.core-test
   (:require [clojure.test :refer :all]
+            [clojure.edn :as edn]
             [yarf.core :refer :all]))
 
 (deftest create-tile-map-test
@@ -1237,3 +1238,192 @@
           ctx {:input-fn input-fn :key-map key-map}
           result (player-act player m ctx)]
       (is (:quit result)))))
+
+;; Save/Load tests
+
+(defn test-act-fn
+  "A named act function for save/load testing."
+  [entity game-map _ctx]
+  {:map (update-entity game-map entity move-entity-by 1 0)})
+
+(deftest restore-act-functions-test
+  (testing "restores :act from type registry based on entity :type"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin" :act test-act-fn}))
+          goblin (create-entity :goblin \g :green 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          restored (restore-act-functions m registry)
+          restored-goblin (first (get-entities restored))]
+      (is (= test-act-fn (:act restored-goblin)))))
+  (testing "leaves entities without registered :act unchanged"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin"}))
+          goblin (create-entity :goblin \g :green 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          restored (restore-act-functions m registry)
+          restored-goblin (first (get-entities restored))]
+      (is (nil? (:act restored-goblin)))))
+  (testing "handles multiple entity types"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:act test-act-fn}))
+          player (create-entity :player \@ :yellow 3 3)
+          goblin (create-entity :goblin \g :green 7 7)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin))
+          restored (restore-act-functions m registry)
+          entities (get-entities restored)]
+      (is (= player-act (:act (first entities))))
+      (is (= test-act-fn (:act (second entities)))))))
+
+(deftest prepare-save-data-test
+  (testing "strips :act from all entities"
+    (let [goblin (create-entity :goblin \g :green 5 5 {:act test-act-fn})
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          save-data (prepare-save-data m {})]
+      (is (nil? (:act (first (get-entities (:game-map save-data))))))))
+  (testing "includes :version 1"
+    (let [m (create-tile-map 5 5)
+          save-data (prepare-save-data m {})]
+      (is (= 1 (:version save-data)))))
+  (testing "passes through save-state keys"
+    (let [m (create-tile-map 5 5)
+          save-data (prepare-save-data m {:explored #{[1 1] [2 2]}
+                                          :viewport {:width 50 :height 25}})]
+      (is (= #{[1 1] [2 2]} (:explored save-data)))
+      (is (= {:width 50 :height 25} (:viewport save-data)))))
+  (testing "preserves entity data other than :act"
+    (let [goblin (create-entity :goblin \g :green 5 5 {:act test-act-fn :hp 10 :delay 15})
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          save-data (prepare-save-data m {})
+          saved-goblin (first (get-entities (:game-map save-data)))]
+      (is (= :goblin (:type saved-goblin)))
+      (is (= [5 5] (:pos saved-goblin)))
+      (is (= 10 (:hp saved-goblin)))
+      (is (= 15 (:delay saved-goblin))))))
+
+(deftest restore-save-data-test
+  (testing "restores act functions and returns full state map"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act test-act-fn}))
+          save-data {:version 1
+                     :game-map (-> (create-tile-map 10 10)
+                                   (add-entity (create-entity :goblin \g :green 5 5)))
+                     :explored #{[1 1]}}
+          restored (restore-save-data save-data registry)]
+      (is (= test-act-fn (:act (first (get-entities (:game-map restored))))))
+      (is (= #{[1 1]} (:explored restored)))))
+  (testing "throws on unsupported version"
+    (let [registry (create-type-registry)
+          save-data {:version 99 :game-map (create-tile-map 5 5)}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
+            (restore-save-data save-data registry))))))
+
+(deftest edn-round-trip-test
+  (testing "full pipeline: prepare -> EDN serialize -> deserialize -> restore"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:act test-act-fn}))
+          player (create-entity :player \@ :yellow 5 5 {:act player-act :view-radius 8})
+          goblin (create-entity :goblin \g :green 18 6 {:act test-act-fn :delay 12 :next-action 30})
+          game-map (-> (create-tile-map 20 15)
+                       (set-tile 3 3 wall-tile)
+                       (add-entity player)
+                       (add-entity goblin))
+          explored #{[5 5] [5 6] [6 5]}
+          save-data (prepare-save-data game-map {:explored explored})
+          edn-str (pr-str save-data)
+          parsed (edn/read-string edn-str)
+          restored (restore-save-data parsed registry)
+          restored-map (:game-map restored)
+          restored-player (get-player restored-map)
+          restored-goblin (first (filter #(= :goblin (entity-type %)) (get-entities restored-map)))]
+      ;; Map structure
+      (is (= 20 (map-width restored-map)))
+      (is (= 15 (map-height restored-map)))
+      ;; Tile data
+      (is (= :wall (:type (get-tile restored-map 3 3))))
+      (is (= :floor (:type (get-tile restored-map 0 0))))
+      ;; Player
+      (is (= [5 5] (entity-pos restored-player)))
+      (is (= \@ (entity-char restored-player)))
+      (is (= :yellow (entity-color restored-player)))
+      (is (= 8 (:view-radius restored-player)))
+      (is (= player-act (:act restored-player)))
+      ;; Goblin
+      (is (= [18 6] (entity-pos restored-goblin)))
+      (is (= 12 (:delay restored-goblin)))
+      (is (= 30 (:next-action restored-goblin)))
+      (is (= test-act-fn (:act restored-goblin)))
+      ;; Explored set
+      (is (= explored (:explored restored))))))
+
+(deftest save-load-game-test
+  (testing "save and load round-trip via gzip file"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:act test-act-fn}))
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          goblin (create-entity :goblin \g :green 7 7 {:act test-act-fn :delay 12})
+          game-map (-> (create-tile-map 15 15)
+                       (set-tile 2 2 wall-tile)
+                       (add-entity player)
+                       (add-entity goblin))
+          explored #{[5 5] [6 6]}
+          tmp-file (str (.getAbsolutePath (java.io.File/createTempFile "yarf-test" ".sav")))]
+      (try
+        (save-game tmp-file game-map {:explored explored})
+        (let [restored (load-game tmp-file registry)
+              restored-map (:game-map restored)]
+          (is (= 15 (map-width restored-map)))
+          (is (= :wall (:type (get-tile restored-map 2 2))))
+          (is (= [5 5] (entity-pos (get-player restored-map))))
+          (is (= player-act (:act (get-player restored-map))))
+          (is (= explored (:explored restored))))
+        (finally
+          (.delete (java.io.File. tmp-file))))))
+  (testing "load-game throws on nonexistent file"
+    (is (thrown? java.io.FileNotFoundException
+          (load-game "/tmp/nonexistent-yarf-save.sav" (create-type-registry)))))
+  (testing "load-game throws on corrupt file"
+    (let [tmp-file (str (.getAbsolutePath (java.io.File/createTempFile "yarf-corrupt" ".sav")))]
+      (try
+        (spit tmp-file "this is not gzipped edn")
+        (is (thrown? Exception
+              (load-game tmp-file (create-type-registry))))
+        (finally
+          (.delete (java.io.File. tmp-file)))))))
+
+(deftest pass-through-actions-test
+  (testing "action in :pass-through-actions returns as flag"
+    (let [inputs (atom [\S])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          key-map (assoc default-key-map \S :save)
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          ctx {:input-fn input-fn :key-map key-map
+               :pass-through-actions #{:save}}
+          result (player-act player m ctx)]
+      (is (= :save (:action result)))
+      (is (:no-time result))
+      (is (= m (:map result)))))
+  (testing "without :pass-through-actions, unrecognized mapped actions go to execute-action"
+    (let [inputs (atom [\S])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          key-map (assoc default-key-map \S :save)
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          ctx {:input-fn input-fn :key-map key-map}
+          result (player-act player m ctx)]
+      ;; :save goes through execute-action, returns unchanged map (no retry),
+      ;; player stays put
+      (is (= 5 (first (entity-pos (get-player (:map result))))))
+      (is (nil? (:action result))))))
+

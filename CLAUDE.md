@@ -39,6 +39,8 @@ Types define shared immutable properties (description, lore, etc.) for entities 
 - `get-instance-type-property [registry instance property]` - get type property from instance
 - `get-property [registry instance property]` - instance value, falling back to type
 
+**Type `:act` property:** Entity types can register an `:act` function. This is used by save/load to strip act functions on save and restore them on load via `restore-act-functions`. Act functions must be named (not anonymous closures) for this to work.
+
 **Type inheritance:** Types can have `:parent` for single inheritance. Property lookup walks up the chain until found.
 
 ```clojure
@@ -112,6 +114,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `:registry` - type registry for look-at (enables look mode)
 - `:on-look-move` - `(fn [ctx game-map cx cy look-info])` callback during look mode
 - `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
+- `:pass-through-actions` - set of action keywords that `player-act` returns as `{:action <keyword>}` for the game loop to handle (e.g. `#{:save}`)
 - Game-specific: `:screen`, `:viewport`, `:explored`, etc.
 
 **Action timing:**
@@ -167,6 +170,7 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:time-cost N` - action takes N ticks instead of entity's delay
 - `:retry` - action had no effect, poll for new input (used with `:no-time`)
 - `:quit` - signals game should exit
+- `:action` - pass-through action keyword (returned when action is in `:pass-through-actions`)
 
 ### Map Generation (`yarf.core`)
 
@@ -181,6 +185,26 @@ Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed 
 
 - `compute-fov [map ox oy]` or `[map ox oy radius]` - returns `#{[x y] ...}` set of visible coordinates from origin; nil radius = unlimited (bounded by map size)
 - `compute-entity-fov [map entity]` - uses entity's `:pos` and `:view-radius` (nil = unlimited)
+
+### Save/Load (`yarf.core`)
+
+Saves game state as gzipped EDN. Act functions are stripped on save and restored from the type registry on load.
+
+- `restore-act-functions [game-map registry]` - restores `:act` on entities from registry by `:type`
+- `prepare-save-data [game-map save-state]` - strips `:act`, adds `:version 1`, merges save-state (e.g. `:explored`, `:viewport`)
+- `restore-save-data [save-data registry]` - restores act functions; throws on unsupported version
+- `save-game [file-path game-map save-state]` - writes gzipped EDN to file
+- `load-game [file-path registry]` - reads gzipped EDN, restores act functions, returns `{:version :game-map :explored ...}`
+
+**Save data format:**
+```clojure
+{:version 1
+ :game-map <map-with-act-stripped>
+ :explored #{[x y] ...}    ;; game-specific
+ :viewport {...}}           ;; game-specific
+```
+
+**Requirements for save/load:** Entity act functions must be named functions (not anonymous closures) and registered as `:act` on their entity type in the type registry.
 
 ### Display (`yarf.display`)
 
@@ -211,14 +235,17 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
-- Player and two wandering goblins
-- Type registry with tile/entity names and descriptions
+- `Shift-S` to save game (writes `yarf-save.dat` in working directory)
+- On startup, prompts to load if a save file exists
+- Player and two wandering goblins (named `goblin-wander` act function)
+- Type registry with tile/entity names, descriptions, and `:act` functions for save/load support
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
 - Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 - FOV/fog of war: visible tiles in color, explored tiles in blue, unexplored black; entities hidden outside FOV
 - Explored state is a plain set threaded through the game loop via ctx. The `game-loop` updates `:explored` in ctx each turn; look-mode callbacks read it from ctx.
+- Uses `:pass-through-actions #{:save}` in ctx so `player-act` returns `:save` action for the game loop to handle.
 
 ## Style
 
@@ -230,7 +257,6 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
 - Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
-- Implement save/load using EDN + gzip. With act functions no longer closures (they're named functions like `player-act`), save just needs to persist the game map and context data; load reconstructs act functions by looking up entity `:type`.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
 - Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
 

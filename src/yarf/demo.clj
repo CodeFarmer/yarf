@@ -5,18 +5,30 @@
             [lanterna.screen :as s])
   (:gen-class))
 
+(def save-file "yarf-save.dat")
+
 (def demo-key-map
-  "Key bindings for demo: vi-style movement plus quit."
+  "Key bindings for demo: vi-style movement plus quit, Shift-S to save."
   (merge core/default-key-map
          {\q :quit
-          :escape :quit}))
+          :escape :quit
+          \S :save}))
+
+(defn goblin-wander
+  "Act function for goblins: wander randomly."
+  [entity game-map _ctx]
+  (let [dx (- (rand-int 3) 1)
+        dy (- (rand-int 3) 1)]
+    (core/try-move game-map entity dx dy)))
 
 (defn create-demo-registry
   "Creates a type registry for the demo with tile and entity descriptions."
   []
   (-> (core/create-type-registry)
-      (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."})
-      (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."})
+      (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."
+                                        :act core/player-act})
+      (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."
+                                        :act goblin-wander})
       (core/define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."})
       (core/define-tile-type :wall {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
       (core/define-tile-type :water {:name "Water" :description "Dark, still water."})))
@@ -113,10 +125,7 @@
   "Creates a goblin that wanders randomly."
   [x y]
   (core/create-entity :goblin \g :green x y
-                      {:act (fn [e m _ctx]
-                              (let [dx (- (rand-int 3) 1)
-                                    dy (- (rand-int 3) 1)]
-                                (core/try-move m e dx dy)))}))
+                      {:act goblin-wander}))
 
 (defn create-demo-game
   "Creates a demo game state."
@@ -138,10 +147,10 @@
 
 (defn game-loop
   "Main game loop. Threads explored state as a plain set through ctx."
-  [screen initial-map base-ctx]
+  [screen initial-map base-ctx initial-explored]
   (loop [game-map initial-map
          message nil
-         explored #{}]
+         explored (or initial-explored #{})]
     (let [player (core/get-player game-map)
           fov (core/compute-entity-fov game-map player)
           explored (into explored fov)
@@ -149,10 +158,31 @@
       (render-game screen game-map vp message fov explored)
       (let [ctx (assoc base-ctx :explored explored)
             result (core/process-actors game-map ctx)
-            {:keys [map quit message]} result]
-        (if quit
-          :quit
+            {:keys [map quit message action]} result]
+        (cond
+          quit :quit
+          (= :save action)
+          (do (core/save-game save-file map {:explored explored
+                                             :viewport (:viewport base-ctx)})
+              (recur map "Game saved." explored))
+          :else
           (recur map message explored))))))
+
+(defn- load-saved-game
+  "Attempts to load a saved game. Returns {:game-map m :explored e} or nil."
+  [registry]
+  (when (.exists (java.io.File. save-file))
+    (println "Save file found. Load it? (y/n)")
+    (let [answer (read-line)]
+      (when (= "y" (.toLowerCase (.trim answer)))
+        (try
+          (let [restored (core/load-game save-file registry)]
+            (println "Game loaded.")
+            {:game-map (:game-map restored)
+             :explored (:explored restored)})
+          (catch Exception e
+            (println (str "Failed to load save: " (.getMessage e)))
+            nil))))))
 
 (defn run-demo
   "Runs the demo game."
@@ -160,24 +190,29 @@
   (println "Starting YARF demo...")
   (println "Movement: hjkl (vi-style), yubn (diagonals)")
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
+  (println "Save: Shift-S")
   (println "Quit: q or ESC")
-  (println "Press Enter to start...")
-  (read-line)
-  (let [viewport (display/create-viewport 50 25)
+  (let [registry (create-demo-registry)
+        loaded (load-saved-game registry)
+        _ (when-not loaded
+            (println "Press Enter to start...")
+            (read-line))
+        viewport (display/create-viewport 50 25)
         screen (s/get-screen :swing {:cols (:width viewport)
                                      :rows (inc (:height viewport))})
-        registry (create-demo-registry)
         base-ctx {:input-fn #(s/get-key-blocking screen)
                   :key-map demo-key-map
                   :registry registry
                   :viewport viewport
                   :screen screen
                   :on-look-move demo-on-look-move
-                  :look-bounds-fn demo-look-bounds-fn}]
+                  :look-bounds-fn demo-look-bounds-fn
+                  :pass-through-actions #{:save}}]
     (s/start screen)
     (try
-      (let [game-map (create-demo-game)]
-        (game-loop screen game-map base-ctx))
+      (let [game-map (or (:game-map loaded) (create-demo-game))
+            explored (or (:explored loaded) #{})]
+        (game-loop screen game-map base-ctx explored))
       (finally
         (s/stop screen))))
   (println "Demo ended."))
