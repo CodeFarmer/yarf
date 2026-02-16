@@ -486,7 +486,8 @@
                     (let [result (act-entity current-map current ctx)]
                       (cond-> {:map (:map result)}
                         (or (:quit accum) (:quit result))       (assoc :quit true)
-                        (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))))
+                        (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))
+                        (or (:action accum) (:action result))   (assoc :action (or (:action result) (:action accum)))))
                     accum)
                   accum)))
             {:map tile-map}
