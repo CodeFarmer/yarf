@@ -167,7 +167,7 @@
             (= :save action)
             (do (core/save-game save-file map {:explored explored
                                                :viewport (:viewport base-ctx)})
-                (recur map "Game saved." explored))
+                :saved)
             :else
             (recur map message explored)))))))
 
@@ -212,13 +212,15 @@
                   :look-bounds-fn demo-look-bounds-fn
                   :pass-through-actions #{:save}}]
     (s/start screen)
-    (try
-      (let [game-map (or (:game-map loaded) (create-demo-game))
-            explored (or (:explored loaded) #{})]
-        (game-loop screen game-map base-ctx explored))
-      (finally
-        (s/stop screen))))
-  (println "Demo ended."))
+    (let [result (try
+                   (let [game-map (or (:game-map loaded) (create-demo-game))
+                         explored (or (:explored loaded) #{})]
+                     (game-loop screen game-map base-ctx explored))
+                   (finally
+                     (s/stop screen)))]
+      (case result
+        :saved (println "Game saved.")
+        (println "Demo ended.")))))
 
 (defn -main
   "Main entry point."
