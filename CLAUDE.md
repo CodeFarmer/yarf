@@ -87,7 +87,7 @@ Entities are game objects (players, monsters, items) with position and display p
 
 **Entity actions and action-results:**
 
-Act functions receive `(entity, game-map)` and return an **action-result** map:
+Act functions receive `(entity, game-map, ctx)` and return an **action-result** map:
 ```clojure
 {:map     updated-game-map   ;; REQUIRED - clean game state
  ;; Optional:
@@ -100,10 +100,19 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
 ```
 
 - `can-act? [entity]` - true if entity has `:act` function
-- `act-entity [map entity]` - calls entity's act fn, processes timing, returns action-result
-- `process-actors [map]` - processes all actors, returns action-result with accumulated flags
-- `process-next-actor [map]` - processes next actor, returns action-result
-- `make-player-act [input-fn]` or `[input-fn key-map]` or `[input-fn key-map opts]` - creates player act fn (returns action-result)
+- `act-entity [map entity ctx]` - calls entity's act fn with ctx, processes timing, returns action-result
+- `process-actors [map ctx]` - processes all actors, returns action-result with accumulated flags
+- `process-next-actor [map ctx]` - processes next actor, returns action-result
+- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn` from ctx
+
+**Context (ctx):**
+A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys used by `player-act` and `look-mode`:
+- `:input-fn` - blocking input function `(fn [] key)` (required for player)
+- `:key-map` - maps input keys to actions (required for player)
+- `:registry` - type registry for look-at (enables look mode)
+- `:on-look-move` - `(fn [ctx game-map cx cy look-info])` callback during look mode
+- `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
+- Game-specific: `:screen`, `:viewport`, `:explored`, etc.
 
 **Action timing:**
 - `entity-delay` - default ticks between actions (default 10). Lower = faster.
@@ -127,22 +136,18 @@ Act functions receive `(entity, game-map)` and return an **action-result** map:
   - `:can-swim true` - entity can traverse water tiles
 
 **Input retry behavior:**
-- `make-player-act` loops until an action that affects the world is performed
+- `player-act` loops until an action that affects the world is performed
 - Failed moves and unknown keys are retried immediately without consuming time
 - Valid actions (successful moves, quit) exit the loop
-- `:look` and `:quit` are handled in `make-player-act`, not in `execute-action`
-
-**`make-player-act` opts:**
-- `:registry` - type registry for `look-at` (enables look mode)
-- `:on-look-move` - `(fn [game-map cx cy look-info])` callback called at initial cursor position and each move during look mode
-- `:look-bounds-fn` - `(fn [game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry; keeps core display-agnostic (it knows about a bounding rect, not viewports)
-- Without `:registry`, pressing look key is treated as unknown input (retried)
+- `:look` and `:quit` are handled in `player-act`, not in `execute-action`
+- Without `:registry` in ctx, pressing look key is treated as unknown input (retried)
 
 **Look mode (`yarf.core`):**
-- `look-mode [registry game-map start-x start-y input-fn key-map on-move]` - self-contained cursor movement loop
-- `look-mode [registry game-map start-x start-y input-fn key-map on-move bounds]` - with optional bounds
+- `look-mode [ctx game-map start-x start-y]` - self-contained cursor movement loop
+- `look-mode [ctx game-map start-x start-y bounds]` - with optional bounds
+- Reads `:registry`, `:input-fn`, `:key-map`, `:on-look-move` from ctx
 - Cursor starts at `(start-x, start-y)`, moves with directional keys (same key-map as player)
-- `on-move` callback: `(fn [game-map cx cy look-info])` - called at initial position and each cursor move
+- `:on-look-move` callback: `(fn [ctx game-map cx cy look-info])` - called at initial position and each cursor move
 - `look-info` is the result of `(look-at registry game-map cx cy)`
 - `bounds`: optional `[min-x min-y max-x max-y]` to constrain cursor movement (intersected with map bounds); nil = map bounds only
 - Enter: returns `{:map game-map :no-time true :message description}` (falls back to "You see {name}.")
@@ -190,9 +195,6 @@ Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed 
 - `create-curses-display [viewport]` or `[viewport screen-type]`
 - `render-map-to-display` / `render-entities-to-display` - render using protocol
 
-**Player with display:**
-- `create-player-with-display [x y display]` or `[x y display key-map]`
-
 **Viewport:**
 - `create-viewport [w h]` - create viewport
 - `center-viewport-on` / `clamp-to-map` - position viewport
@@ -216,7 +218,7 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 - FOV/fog of war: visible tiles in color, explored tiles in blue, unexplored black; entities hidden outside FOV
-- Explored state is an `atom` shared between `game-loop` and the player's `on-look-move` closure. This is a pragmatic workaround: the act function signature `(entity, game-map)` provides no way to thread display-only state into callbacks. Revisit if the act interface gains an extensible context parameter or if explored state moves into core.
+- Explored state is a plain set threaded through the game loop via ctx. The `game-loop` updates `:explored` in ctx each turn; look-mode callbacks read it from ctx.
 
 ## Style
 
@@ -227,9 +229,13 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
 - Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
+- Implement save/load using EDN + gzip. With act functions no longer closures (they're named functions like `player-act`), save just needs to persist the game map and context data; load reconstructs act functions by looking up entity `:type`.
+- Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
+- Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
 
 ## Development Notes
 
 - Clojure version: 1.10.3
 - License: EPL-2.0 OR GPL-2.0-or-later
 - Uses TDD: write failing tests first, then implement
+- **Commits:** Do not add AI/co-authored-by lines to commit messages

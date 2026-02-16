@@ -437,13 +437,13 @@
 
 (defn act-entity
   "Calls the entity's act function if it has one.
-   The act function receives (entity, game-map) and returns an action-result map
+   The act function receives (entity, game-map, ctx) and returns an action-result map
    {:map updated-map, optional :time-cost, :no-time, :retry, :quit, :message}.
    After acting, the entity's next-action is incremented by :time-cost
    if present, otherwise by its delay. If :no-time is set, no increment occurs."
-  [tile-map entity]
+  [tile-map entity ctx]
   (if-let [act-fn (:act entity)]
-    (let [result (act-fn entity tile-map)
+    (let [result (act-fn entity tile-map ctx)
           {:keys [map no-time time-cost]} result
           acted-entity (find-acted-entity (get-entities map) entity)
           updated-map (if (and acted-entity (not no-time))
@@ -465,21 +465,21 @@
 (defn process-next-actor
   "Processes only the entity with the lowest next-action value.
    Returns an action-result map."
-  [tile-map]
+  [tile-map ctx]
   (if-let [actor (get-next-actor tile-map)]
-    (act-entity tile-map actor)
+    (act-entity tile-map actor ctx)
     {:map tile-map}))
 
 (defn process-actors
   "Processes all entities that have act functions.
    Returns an action-result map with :map, and accumulated :quit/:message flags."
-  [tile-map]
+  [tile-map ctx]
   (reduce (fn [accum entity]
             (let [current-map (:map accum)]
               (if (can-act? entity)
                 ;; Re-fetch entity from map in case it was modified
                 (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
-                  (let [result (act-entity current-map current)]
+                  (let [result (act-entity current-map current ctx)]
                     (cond-> {:map (:map result)}
                       (or (:quit accum) (:quit result))       (assoc :quit true)
                       (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))))
@@ -542,90 +542,83 @@
 
 (defn look-mode
   "Enters look mode: cursor starts at (start-x, start-y), moves with directional keys.
-   input-fn: blocking input function (returns key)
-   key-map: maps keys to actions (uses direction-deltas for movement)
-   on-move: (fn [game-map cx cy look-info]) called at initial position and each move
+   Reads from ctx: :registry, :input-fn, :key-map, :on-look-move.
+   on-look-move: (fn [ctx game-map cx cy look-info]) called at initial position and each move
    bounds: optional [min-x min-y max-x max-y] to constrain cursor (nil = map bounds only)
    Returns action-result:
      Enter  -> {:map game-map :no-time true :message description}
      Escape -> {:map game-map :no-time true}"
-  ([registry game-map start-x start-y input-fn key-map on-move]
-   (look-mode registry game-map start-x start-y input-fn key-map on-move nil))
-  ([registry game-map start-x start-y input-fn key-map on-move bounds]
-   (loop [cx start-x
-          cy start-y]
-     (let [look-info (look-at registry game-map cx cy)]
-       (when on-move
-         (on-move game-map cx cy look-info))
-       (let [input (input-fn)
-             action (get key-map input)]
-         (cond
-           ;; Enter: return description
-           (= input :enter)
-           {:map game-map :no-time true
-            :message (or (:description look-info)
-                         (str "You see " (:name look-info) "."))}
+  ([ctx game-map start-x start-y]
+   (look-mode ctx game-map start-x start-y nil))
+  ([ctx game-map start-x start-y bounds]
+   (let [{:keys [registry input-fn key-map on-look-move]} ctx]
+     (loop [cx start-x
+            cy start-y]
+       (let [look-info (look-at registry game-map cx cy)]
+         (when on-look-move
+           (on-look-move ctx game-map cx cy look-info))
+         (let [input (input-fn)
+               action (get key-map input)]
+           (cond
+             ;; Enter: return description
+             (= input :enter)
+             {:map game-map :no-time true
+              :message (or (:description look-info)
+                           (str "You see " (:name look-info) "."))}
 
-           ;; Escape: cancel
-           (= input :escape)
-           {:map game-map :no-time true}
+             ;; Escape: cancel
+             (= input :escape)
+             {:map game-map :no-time true}
 
-           ;; Movement: move cursor if in bounds
-           (direction-deltas action)
-           (let [[dx dy] (direction-deltas action)
-                 nx (+ cx dx)
-                 ny (+ cy dy)]
-             (if (in-look-bounds? game-map bounds nx ny)
-               (recur nx ny)
-               (recur cx cy)))
+             ;; Movement: move cursor if in bounds
+             (direction-deltas action)
+             (let [[dx dy] (direction-deltas action)
+                   nx (+ cx dx)
+                   ny (+ cy dy)]
+               (if (in-look-bounds? game-map bounds nx ny)
+                 (recur nx ny)
+                 (recur cx cy)))
 
-           ;; Unknown key: ignore
-           :else
-           (recur cx cy)))))))
+             ;; Unknown key: ignore
+             :else
+             (recur cx cy))))))))
 
-(defn make-player-act
-  "Creates a player act function that calls input-fn to get input.
-   Optional key-map translates input keys to actions.
-   Optional opts map supports:
-     :registry     - type registry for look-at (enables look mode)
-     :on-look-move - (fn [game-map cx cy look-info]) called during look mode
+(defn player-act
+  "Player act function. Reads :input-fn, :key-map, :registry, :look-bounds-fn from ctx.
    Loops until an action that affects the world is performed.
    Failed moves and unknown keys are retried immediately.
    Returns an action-result map."
-  ([input-fn] (make-player-act input-fn default-key-map))
-  ([input-fn key-map] (make-player-act input-fn key-map nil))
-  ([input-fn key-map opts]
-   (fn [entity game-map]
-     (loop []
-       (let [input (input-fn)
-             action (get key-map input)]
-         (cond
-           ;; Quit
-           (= action :quit)
-           {:map game-map :quit true}
+  [entity game-map ctx]
+  (let [{:keys [input-fn key-map registry look-bounds-fn]} ctx]
+    (loop []
+      (let [input (input-fn)
+            action (get key-map input)]
+        (cond
+          ;; Quit
+          (= action :quit)
+          {:map game-map :quit true}
 
-           ;; Look mode with opts
-           (and (= action :look) (:registry opts))
-           (let [[px py] (entity-pos entity)
-                 bounds (when-let [bounds-fn (:look-bounds-fn opts)]
-                          (bounds-fn game-map entity))
-                 result (look-mode (:registry opts) game-map px py
-                                   input-fn key-map (:on-look-move opts) bounds)]
-             (if (:message result)
-               result
-               (recur)))
+          ;; Look mode with registry
+          (and (= action :look) registry)
+          (let [[px py] (entity-pos entity)
+                bounds (when look-bounds-fn
+                         (look-bounds-fn ctx game-map entity))
+                result (look-mode ctx game-map px py bounds)]
+            (if (:message result)
+              result
+              (recur)))
 
-           ;; Look without opts - retry
-           (= action :look)
-           (recur)
+          ;; Look without registry - retry
+          (= action :look)
+          (recur)
 
-           ;; World action (movement etc.)
-           action
-           (let [result (execute-action action entity game-map)]
-             (if (:retry result)
-               (recur)
-               result))
+          ;; World action (movement etc.)
+          action
+          (let [result (execute-action action entity game-map)]
+            (if (:retry result)
+              (recur)
+              result))
 
-           ;; Unknown key
-           :else
-           (recur)))))))
+          ;; Unknown key
+          :else
+          (recur))))))

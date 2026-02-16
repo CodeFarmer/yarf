@@ -78,47 +78,51 @@
       (s/move-cursor screen sx sy))
     (s/redraw screen)))
 
+(defn demo-on-look-move
+  "Look-mode callback: renders the game with cursor at (cx, cy)."
+  [ctx game-map cx cy look-info]
+  (let [{:keys [screen viewport explored]} ctx
+        player (core/get-player game-map)
+        [px py] (core/entity-pos player)
+        vp (-> viewport
+               (display/center-viewport-on px py)
+               (display/clamp-to-map game-map))
+        fov (core/compute-entity-fov game-map player)]
+    (render-look-frame screen game-map vp cx cy look-info fov explored)))
+
+(defn demo-look-bounds-fn
+  "Look-mode bounds callback: constrains cursor to viewport."
+  [ctx game-map entity]
+  (let [{:keys [viewport]} ctx
+        [px py] (core/entity-pos entity)
+        vp (-> viewport
+               (display/center-viewport-on px py)
+               (display/clamp-to-map game-map))
+        {:keys [offset-x offset-y width height]} vp]
+    [offset-x offset-y
+     (+ offset-x (dec width))
+     (+ offset-y (dec height))]))
+
 (defn create-demo-player
-  "Creates a player for the demo with vi-style movement, quit, look mode."
-  [x y screen registry base-viewport explored-atom]
-  (let [input-fn #(s/get-key-blocking screen)
-        on-look-move (fn [game-map cx cy look-info]
-                       (let [player (core/get-player game-map)
-                             [px py] (core/entity-pos player)
-                             vp (-> base-viewport
-                                    (display/center-viewport-on px py)
-                                    (display/clamp-to-map game-map))
-                             fov (core/compute-entity-fov game-map player)]
-                         (render-look-frame screen game-map vp cx cy look-info fov @explored-atom)))]
-    (core/create-entity :player \@ :yellow x y
-                        {:act (core/make-player-act input-fn demo-key-map
-                                                    {:registry registry
-                                                     :on-look-move on-look-move
-                                                     :look-bounds-fn
-                                                     (fn [game-map entity]
-                                                       (let [[px py] (core/entity-pos entity)
-                                                             vp (-> base-viewport
-                                                                    (display/center-viewport-on px py)
-                                                                    (display/clamp-to-map game-map))
-                                                             {:keys [offset-x offset-y width height]} vp]
-                                                         [offset-x offset-y
-                                                          (+ offset-x (dec width))
-                                                          (+ offset-y (dec height))]))})})))
+  "Creates a player for the demo. Uses player-act with ctx."
+  [x y]
+  (core/create-entity :player \@ :yellow x y
+                      {:act core/player-act}))
 
 (defn create-wandering-goblin
   "Creates a goblin that wanders randomly."
   [x y]
   (core/create-entity :goblin \g :green x y
-                      {:act (fn [e m]
+                      {:act (fn [e m _ctx]
                               (let [dx (- (rand-int 3) 1)
                                     dy (- (rand-int 3) 1)]
                                 (core/try-move m e dx dy)))}))
 
 (defn create-demo-game
   "Creates a demo game state."
-  [screen registry viewport explored-atom]
+  []
   (-> (core/generate-test-map 60 40)
-      (core/add-entity (create-demo-player 5 5 screen registry viewport explored-atom))
+      (core/add-entity (create-demo-player 5 5))
       (core/add-entity (create-wandering-goblin 18 6))
       (core/add-entity (create-wandering-goblin 8 18))))
 
@@ -133,20 +137,22 @@
     viewport))
 
 (defn game-loop
-  "Main game loop."
-  [screen initial-map viewport explored-atom]
+  "Main game loop. Threads explored state as a plain set through ctx."
+  [screen initial-map base-ctx]
   (loop [game-map initial-map
-         message nil]
+         message nil
+         explored #{}]
     (let [player (core/get-player game-map)
           fov (core/compute-entity-fov game-map player)
-          _ (swap! explored-atom into fov)
-          vp (center-viewport-on-player game-map viewport)]
-      (render-game screen game-map vp message fov @explored-atom)
-      (let [result (core/process-actors game-map)
+          explored (into explored fov)
+          vp (center-viewport-on-player game-map (:viewport base-ctx))]
+      (render-game screen game-map vp message fov explored)
+      (let [ctx (assoc base-ctx :explored explored)
+            result (core/process-actors game-map ctx)
             {:keys [map quit message]} result]
         (if quit
           :quit
-          (recur map message))))))
+          (recur map message explored))))))
 
 (defn run-demo
   "Runs the demo game."
@@ -160,12 +166,18 @@
   (let [viewport (display/create-viewport 50 25)
         screen (s/get-screen :swing {:cols (:width viewport)
                                      :rows (inc (:height viewport))})
-        registry (create-demo-registry)]
+        registry (create-demo-registry)
+        base-ctx {:input-fn #(s/get-key-blocking screen)
+                  :key-map demo-key-map
+                  :registry registry
+                  :viewport viewport
+                  :screen screen
+                  :on-look-move demo-on-look-move
+                  :look-bounds-fn demo-look-bounds-fn}]
     (s/start screen)
     (try
-      (let [explored-atom (atom #{})
-            game-map (create-demo-game screen registry viewport explored-atom)]
-        (game-loop screen game-map viewport explored-atom))
+      (let [game-map (create-demo-game)]
+        (game-loop screen game-map base-ctx))
       (finally
         (s/stop screen))))
   (println "Demo ended."))

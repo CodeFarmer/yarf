@@ -1,19 +1,6 @@
 (ns yarf.core-test
   (:require [clojure.test :refer :all]
-            [yarf.core :refer :all]
-            [yarf.display :as display]))
-
-(defn mock-display
-  "Creates a mock display that returns the given input."
-  [input-atom]
-  (reify display/Display
-    (get-input [_] @input-atom)
-    (render-tile [_ _ _ _] nil)
-    (render-entity [_ _ _ _] nil)
-    (clear-screen [_] nil)
-    (refresh-screen [_] nil)
-    (start-display [this] this)
-    (stop-display [_] nil)))
+            [yarf.core :refer :all]))
 
 (deftest create-tile-map-test
   (testing "creates a tile map with specified dimensions"
@@ -497,7 +484,7 @@
 
 (deftest entity-act-test
   (testing "entities can have an act function"
-    (let [wander-fn (fn [entity game-map]
+    (let [wander-fn (fn [entity game-map _ctx]
                       {:map (update-entity game-map entity move-entity-by 1 0)})
           e (create-entity :goblin \g :green 5 5 {:act wander-fn})
           m (-> (create-tile-map 10 10)
@@ -505,30 +492,30 @@
       (is (can-act? e))
       (is (not (can-act? (create-player 0 0))))))
   (testing "act-entity calls entity's act function"
-    (let [wander-fn (fn [entity game-map]
+    (let [wander-fn (fn [entity game-map _ctx]
                       {:map (update-entity game-map entity move-entity-by 1 0)})
           e (create-entity :goblin \g :green 5 5 {:act wander-fn})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e)]
+          result (act-entity m e {})]
       (is (= 6 (first (entity-pos (first (get-entities (:map result)))))))))
   (testing "act-entity returns unchanged map for entities without act"
     (let [p (create-player 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          result (act-entity m p)]
+          result (act-entity m p {})]
       (is (= m (:map result))))))
 
 (deftest process-actors-test
   (testing "processes all entities with act functions"
-    (let [move-right (fn [entity game-map]
+    (let [move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
           e1 (create-entity :goblin \g :green 3 3 {:act move-right})
           e2 (create-entity :orc \o :green 7 7 {:act move-right})
           m (-> (create-tile-map 10 10)
                 (add-entity e1)
                 (add-entity e2))
-          result (process-actors m)]
+          result (process-actors m {})]
       (is (= 1 (count (get-entities-at (:map result) 4 3))))
       (is (= 1 (count (get-entities-at (:map result) 8 7)))))))
 
@@ -554,41 +541,41 @@
 
 (deftest act-increments-next-action-test
   (testing "acting increments next-action by delay"
-    (let [act-fn (fn [entity game-map]
+    (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)})
           e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e)
+          result (act-entity m e {})
           updated (first (get-entities (:map result)))]
       (is (= 15 (entity-next-action updated)))))
   (testing "acting uses default delay when not specified"
-    (let [act-fn (fn [entity game-map]
+    (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)})
           e (create-entity :goblin \g :green 5 5 {:act act-fn})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e)
+          result (act-entity m e {})
           updated (first (get-entities (:map result)))]
       (is (= 10 (entity-next-action updated)))))
   (testing "action can specify custom :time-cost"
-    (let [act-fn (fn [entity game-map]
+    (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)
                     :time-cost 5})
           e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e)
+          result (act-entity m e {})
           updated (first (get-entities (:map result)))]
       (is (= 5 (entity-next-action updated)))))
   (testing ":time-cost overrides entity delay"
-    (let [slow-action (fn [entity game-map]
+    (let [slow-action (fn [entity game-map _ctx]
                         {:map (update-entity game-map entity move-entity-by 1 0)
                          :time-cost 50})
           fast-entity (create-entity :rat \r :white 5 5 {:act slow-action :delay 2})
           m (-> (create-tile-map 10 10)
                 (add-entity fast-entity))
-          result (act-entity m fast-entity)
+          result (act-entity m fast-entity {})
           updated (first (get-entities (:map result)))]
       ;; Even though entity has delay 2, action took 50
       (is (= 50 (entity-next-action updated))))))
@@ -618,14 +605,14 @@
 
 (deftest process-next-actor-test
   (testing "process-next-actor processes only the entity with lowest next-action"
-    (let [move-right (fn [entity game-map]
+    (let [move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
           fast (create-entity :rat \r :white 3 3 {:act move-right :delay 5 :next-action 0})
           slow (create-entity :turtle \t :green 7 7 {:act move-right :delay 20 :next-action 10})
           m (-> (create-tile-map 10 10)
                 (add-entity fast)
                 (add-entity slow))
-          result (process-next-actor m)
+          result (process-next-actor m {})
           m2 (:map result)]
       ;; Only fast moved (it had lower next-action)
       (is (= 1 (count (get-entities-at m2 4 3))))  ;; rat moved
@@ -639,61 +626,64 @@
 (deftest player-with-display-test
   (testing "player gets input from display"
     (let [input-atom (atom \l)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d)
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          result (act-entity m p)]
+          ctx {:input-fn input-fn :key-map default-key-map}
+          result (act-entity m p ctx)]
       (is (= 6 (first (entity-pos (get-player (:map result))))))))
   (testing "player responds to vi-style hjkl inputs"
     (let [input-atom (atom \k)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d)
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
-                (add-entity p))]
+                (add-entity p))
+          ctx {:input-fn input-fn :key-map default-key-map}]
       ;; k = up
       (reset! input-atom \k)
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 4 (second (entity-pos (get-player (:map result)))))))
       ;; j = down
       (reset! input-atom \j)
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 6 (second (entity-pos (get-player (:map result)))))))
       ;; h = left
       (reset! input-atom \h)
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 4 (first (entity-pos (get-player (:map result)))))))
       ;; l = right
       (reset! input-atom \l)
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 6 (first (entity-pos (get-player (:map result)))))))))
   (testing "player responds to diagonal yubn inputs"
     (let [input-atom (atom \y)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d)
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
-                (add-entity p))]
+                (add-entity p))
+          ctx {:input-fn input-fn :key-map default-key-map}]
       ;; y = up-left
       (reset! input-atom \y)
-      (let [result (act-entity m p)
+      (let [result (act-entity m p ctx)
             player (get-player (:map result))]
         (is (= 4 (first (entity-pos player))))
         (is (= 4 (second (entity-pos player)))))
       ;; u = up-right
       (reset! input-atom \u)
-      (let [result (act-entity m p)
+      (let [result (act-entity m p ctx)
             player (get-player (:map result))]
         (is (= 6 (first (entity-pos player))))
         (is (= 4 (second (entity-pos player)))))
       ;; b = down-left
       (reset! input-atom \b)
-      (let [result (act-entity m p)
+      (let [result (act-entity m p ctx)
             player (get-player (:map result))]
         (is (= 4 (first (entity-pos player))))
         (is (= 6 (second (entity-pos player)))))
       ;; n = down-right
       (reset! input-atom \n)
-      (let [result (act-entity m p)
+      (let [result (act-entity m p ctx)
             player (get-player (:map result))]
         (is (= 6 (first (entity-pos player))))
         (is (= 6 (second (entity-pos player)))))))
@@ -702,11 +692,11 @@
           input-fn #(let [i (first @inputs)]
                       (swap! inputs rest)
                       i)
-          p (create-entity :player \@ :yellow 5 5
-                           {:act (make-player-act input-fn default-key-map)})
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          result (act-entity m p)]
+          ctx {:input-fn input-fn :key-map default-key-map}
+          result (act-entity m p ctx)]
       ;; Should have moved right (the \l input) after skipping invalid inputs
       (is (= 6 (first (entity-pos (get-player (:map result))))))
       (is (= 5 (second (entity-pos (get-player (:map result))))))))
@@ -715,26 +705,27 @@
           input-fn #(let [i (first @inputs)]
                       (swap! inputs rest)
                       i)
-          p (create-entity :player \@ :yellow 5 5
-                           {:act (make-player-act input-fn default-key-map)})
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 wall-tile)  ;; wall above player
                 (add-entity p))
-          result (act-entity m p)]
+          ctx {:input-fn input-fn :key-map default-key-map}
+          result (act-entity m p ctx)]
       ;; Should have moved right after failing to move up twice
       (is (= 6 (first (entity-pos (get-player (:map result))))))
       (is (= 5 (second (entity-pos (get-player (:map result))))))))
-  (testing "process-actors includes player with display"
+  (testing "process-actors includes player with ctx"
     (let [input-atom (atom \l)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d)
-          move-right (fn [entity game-map]
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
           goblin (create-entity :goblin \g :green 3 3 {:act move-right})
           m (-> (create-tile-map 10 10)
                 (add-entity p)
                 (add-entity goblin))
-          result (process-actors m)]
+          ctx {:input-fn input-fn :key-map default-key-map}
+          result (process-actors m ctx)]
       ;; both moved
       (is (= 6 (first (entity-pos (get-player (:map result))))))
       (is (= 1 (count (get-entities-at (:map result) 4 3)))))))
@@ -760,27 +751,29 @@
                      \a :move-left
                      \d :move-right}
           input-atom (atom \w)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d wasd-keys)
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
-                (add-entity p))]
+                (add-entity p))
+          ctx {:input-fn input-fn :key-map wasd-keys}]
       ;; w = up
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 4 (second (entity-pos (get-player (:map result)))))))
       ;; d = right
       (reset! input-atom \d)
-      (let [result (act-entity m p)]
+      (let [result (act-entity m p ctx)]
         (is (= 6 (first (entity-pos (get-player (:map result)))))))))
   (testing "custom key map can include quit action"
     (let [custom-keys {\q :quit
                        :escape :quit
                        :up :move-up}
           input-atom (atom \q)
-          d (mock-display input-atom)
-          p (display/create-player-with-display 5 5 d custom-keys)
+          input-fn #(deref input-atom)
+          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          result (act-entity m p)]
+          ctx {:input-fn input-fn :key-map custom-keys}
+          result (act-entity m p ctx)]
       (is (:quit result)))))
 
 ;; Look action tests
@@ -889,11 +882,12 @@
                        (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
           m (create-tile-map 10 10)
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy (:name info)]))
-          inputs (atom [:escape])]
-      (look-mode registry m 5 5
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move)
+          inputs (atom [:escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy (:name info)]))}]
+      (look-mode ctx m 5 5)
       (is (= 1 (count @calls)))
       (is (= [5 5 "Stone Floor"] (first @calls)))))
 
@@ -902,11 +896,12 @@
                        (define-tile-type :floor {:name "Floor"}))
           m (create-tile-map 10 10)
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
-          inputs (atom [\l \j :escape])]
-      (look-mode registry m 5 5
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move)
+          inputs (atom [\l \j :escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy]))}]
+      (look-mode ctx m 5 5)
       ;; Initial + 2 moves = 3 calls
       (is (= 3 (count @calls)))
       (is (= [5 5] (nth @calls 0)))
@@ -918,9 +913,10 @@
                        (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
           m (create-tile-map 10 10)
           inputs (atom [:enter])
-          result (look-mode registry m 5 5
-                           #(let [i (first @inputs)] (swap! inputs rest) i)
-                           default-key-map nil)]
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
       (is (= "Cold grey stone." (:message result)))
       (is (:no-time result))))
 
@@ -928,18 +924,20 @@
     (let [registry (create-type-registry)
           m (create-tile-map 10 10)
           inputs (atom [:enter])
-          result (look-mode registry m 5 5
-                           #(let [i (first @inputs)] (swap! inputs rest) i)
-                           default-key-map nil)]
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
       (is (= "You see floor." (:message result)))))
 
   (testing "returns no message on Escape"
     (let [registry (create-type-registry)
           m (create-tile-map 10 10)
           inputs (atom [:escape])
-          result (look-mode registry m 5 5
-                           #(let [i (first @inputs)] (swap! inputs rest) i)
-                           default-key-map nil)]
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
       (is (nil? (:message result)))
       (is (:no-time result))))
 
@@ -948,12 +946,13 @@
                        (define-tile-type :floor {:name "Floor"}))
           m (create-tile-map 10 10)
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
           ;; At 0,0 try to go up-left (should stay), then escape
-          inputs (atom [\y :escape])]
-      (look-mode registry m 0 0
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move)
+          inputs (atom [\y :escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy]))}]
+      (look-mode ctx m 0 0)
       ;; Initial + stayed = 2 calls, both at 0,0
       (is (= 2 (count @calls)))
       (is (= [0 0] (first @calls)))
@@ -964,14 +963,15 @@
                        (define-tile-type :floor {:name "Floor"}))
           m (create-tile-map 50 50) ;; map much larger than bounds
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
           ;; Bounds: x 10-14, y 10-14 (5x5 window)
           bounds [10 10 14 14]
           ;; Start at 12,12, try to move right 3 times (should stop at x=14)
-          inputs (atom [\l \l \l :escape])]
-      (look-mode registry m 12 12
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move bounds)
+          inputs (atom [\l \l \l :escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy]))}]
+      (look-mode ctx m 12 12 bounds)
       ;; Initial(12,12) + right(13,12) + right(14,12) + stayed(14,12) = 4 calls
       (is (= 4 (count @calls)))
       (is (= [12 12] (nth @calls 0)))
@@ -984,14 +984,15 @@
                        (define-tile-type :floor {:name "Floor"}))
           m (create-tile-map 10 10)
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
           ;; Bounds extend beyond map (map is 0-9, bounds say 0-20)
           bounds [0 0 20 20]
           ;; At 9,5, try to move right (blocked by map edge, not bounds)
-          inputs (atom [\l :escape])]
-      (look-mode registry m 9 5
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move bounds)
+          inputs (atom [\l :escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy]))}]
+      (look-mode ctx m 9 5 bounds)
       (is (= 2 (count @calls)))
       (is (= [9 5] (first @calls)))
       (is (= [9 5] (second @calls)))))
@@ -1001,11 +1002,12 @@
                        (define-tile-type :floor {:name "Floor"}))
           m (create-tile-map 10 10)
           calls (atom [])
-          on-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
-          inputs (atom [\l :escape])]
-      (look-mode registry m 5 5
-                 #(let [i (first @inputs)] (swap! inputs rest) i)
-                 default-key-map on-move nil)
+          inputs (atom [\l :escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map
+               :on-look-move (fn [_ctx gm cx cy info] (swap! calls conj [cx cy]))}]
+      (look-mode ctx m 5 5 nil)
       (is (= 2 (count @calls)))
       (is (= [5 5] (first @calls)))
       (is (= [6 5] (second @calls)))))
@@ -1018,37 +1020,37 @@
           m (-> (create-tile-map 10 10)
                 (add-entity goblin))
           inputs (atom [:enter])
-          result (look-mode registry m 5 5
-                           #(let [i (first @inputs)] (swap! inputs rest) i)
-                           default-key-map nil)]
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
       (is (= "A small goblin." (:message result))))))
 
-(deftest make-player-act-look-mode-test
-  (testing "with opts: enters look mode on x, returns message on Enter"
+(deftest player-act-look-mode-test
+  (testing "with registry in ctx: enters look mode on x, returns message on Enter"
     (let [registry (-> (create-type-registry)
                        (define-entity-type :player {:name "Player" :description "That's you."})
                        (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
           ;; x enters look mode, then move right (away from player), then Enter selects tile
           inputs (atom [\x \l :enter])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          act-fn (make-player-act input-fn default-key-map
-                                  {:registry registry})
-          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity player))
-          result (act-fn player m)]
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
+          result (player-act player m ctx)]
       (is (= "Cold grey stone." (:message result)))
       (is (:no-time result))))
 
-  (testing "without opts: look is ignored, continues to next input"
+  (testing "without registry in ctx: look is ignored, continues to next input"
     (let [;; x (look, ignored), then l (move right)
           inputs (atom [\x \l])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          act-fn (make-player-act input-fn default-key-map)
-          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity player))
-          result (act-fn player m)]
+          ctx {:input-fn input-fn :key-map default-key-map}
+          result (player-act player m ctx)]
       (is (= 6 (first (entity-pos (get-player (:map result))))))))
 
   (testing "look-bounds-fn constrains cursor in look mode"
@@ -1058,17 +1060,17 @@
           inputs (atom [\x \l \l \l :enter])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           calls (atom [])
-          act-fn (make-player-act input-fn default-key-map
-                                  {:registry registry
-                                   :on-look-move (fn [gm cx cy info] (swap! calls conj [cx cy]))
-                                   :look-bounds-fn (fn [gm entity]
-                                                     (let [[px py] (entity-pos entity)]
-                                                       ;; player at 5,5; bounds 3-7 in each direction
-                                                       [(- px 2) (- py 2) (+ px 2) (+ py 2)]))})
-          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 50 50)
                 (add-entity player))
-          result (act-fn player m)]
+          ctx {:input-fn input-fn :key-map default-key-map
+               :registry registry
+               :on-look-move (fn [ctx gm cx cy info] (swap! calls conj [cx cy]))
+               :look-bounds-fn (fn [ctx gm entity]
+                                 (let [[px py] (entity-pos entity)]
+                                   ;; player at 5,5; bounds 3-7 in each direction
+                                   [(- px 2) (- py 2) (+ px 2) (+ py 2)]))}
+          result (player-act player m ctx)]
       ;; Cursor: 5,5 -> 6,5 -> 7,5 -> 7,5 (blocked) -> Enter
       (is (= [5 5] (nth @calls 0)))
       (is (= [6 5] (nth @calls 1)))
@@ -1082,12 +1084,11 @@
           ;; x enters look, escape cancels, then l moves
           inputs (atom [\x :escape \l])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          act-fn (make-player-act input-fn default-key-map
-                                  {:registry registry})
-          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity player))
-          result (act-fn player m)]
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
+          result (player-act player m ctx)]
       ;; Escape from look mode -> recurs -> moves right
       (is (= 6 (first (entity-pos (get-player (:map result)))))))))
 
@@ -1225,14 +1226,14 @@
       (is (contains? fov [0 0]))
       (is (contains? fov [9 9])))))
 
-(deftest make-player-act-quit-test
-  (testing "quit action works in updated make-player-act"
+(deftest player-act-quit-test
+  (testing "quit action works in player-act"
     (let [inputs (atom [\q])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           key-map (assoc default-key-map \q :quit)
-          act-fn (make-player-act input-fn key-map)
-          player (create-entity :player \@ :yellow 5 5 {:act act-fn})
+          player (create-entity :player \@ :yellow 5 5 {:act player-act})
           m (-> (create-tile-map 10 10)
                 (add-entity player))
-          result (act-fn player m)]
+          ctx {:input-fn input-fn :key-map key-map}
+          result (player-act player m ctx)]
       (is (:quit result)))))
