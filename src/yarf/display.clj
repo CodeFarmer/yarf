@@ -7,7 +7,7 @@
 (defprotocol Display
   "Protocol for game display implementations."
   (get-input [this] "Gets input from the display (blocking).")
-  (render-tile [this x y tile] "Renders a tile at screen coordinates.")
+  (render-tile [this x y tile registry] "Renders a tile at screen coordinates using registry for display properties.")
   (render-entity [this x y entity] "Renders an entity at screen coordinates.")
   (clear-screen [this] "Clears the display.")
   (refresh-screen [this] "Refreshes the display to show rendered content.")
@@ -74,7 +74,7 @@
 
 (defn render-map
   "Renders the visible portion of the map to the screen."
-  [screen tile-map viewport]
+  [screen tile-map viewport registry]
   (let [{:keys [width height offset-x offset-y]} viewport]
     (doseq [sy (range height)
             sx (range width)]
@@ -82,8 +82,8 @@
             wy (+ sy offset-y)]
         (when (core/in-bounds? tile-map wx wy)
           (let [tile (core/get-tile tile-map wx wy)
-                ch (core/tile-char tile)
-                color (core/tile-color tile)]
+                ch (core/tile-char registry tile)
+                color (core/tile-color registry tile)]
             (s/put-string screen sx sy (str ch) {:fg color})))))))
 
 (defn render-char
@@ -127,8 +127,8 @@
   Display
   (get-input [this]
     (s/get-key-blocking screen))
-  (render-tile [this x y tile]
-    (s/put-string screen x y (str (core/tile-char tile)) {:fg (core/tile-color tile)}))
+  (render-tile [this x y tile registry]
+    (s/put-string screen x y (str (core/tile-char registry tile)) {:fg (core/tile-color registry tile)}))
   (render-entity [this x y entity]
     (s/put-string screen x y (str (core/entity-char entity)) {:fg (core/entity-color entity)}))
   (clear-screen [this]
@@ -154,14 +154,14 @@
 
 (defn render-map-to-display
   "Renders the visible portion of the map to a Display."
-  [display tile-map]
+  [display tile-map registry]
   (let [{:keys [width height offset-x offset-y]} (:viewport display)]
     (doseq [sy (range height)
             sx (range width)]
       (let [wx (+ sx offset-x)
             wy (+ sy offset-y)]
         (when (core/in-bounds? tile-map wx wy)
-          (render-tile display sx sy (core/get-tile tile-map wx wy)))))))
+          (render-tile display sx sy (core/get-tile tile-map wx wy) registry))))))
 
 (defn render-entities-to-display
   "Renders all visible entities to a Display."

@@ -87,54 +87,62 @@
 ;; Tile properties and constructors
 
 (defn make-tile
-  "Creates a tile with the given type, display character, color, and properties."
-  [tile-type char color properties]
-  (merge {:type tile-type :char char :color color} properties))
+  "Creates a tile with the given type and optional instance-level properties.
+   Display/behavior properties (:char, :color, :walkable, :transparent) are normally
+   defined in the type registry; use instance properties only for overrides."
+  ([tile-type] {:type tile-type})
+  ([tile-type properties] (merge {:type tile-type} properties)))
 
-(def floor-tile
-  (make-tile :floor \. :white {:walkable true :transparent true}))
+(def floor-tile {:type :floor})
+(def wall-tile {:type :wall})
+(def door-closed-tile {:type :door-closed})
+(def door-open-tile {:type :door-open})
+(def water-tile {:type :water})
 
-(def wall-tile
-  (make-tile :wall \# :white {:walkable false :transparent false}))
+(def default-tile-types
+  "Default tile type definitions with display and behavior properties."
+  {:floor {:char \. :color :white :walkable true :transparent true}
+   :wall {:char \# :color :white :walkable false :transparent false}
+   :door-closed {:char \+ :color :yellow :walkable false :transparent false}
+   :door-open {:char \/ :color :yellow :walkable true :transparent true}
+   :water {:char \~ :color :blue :walkable false :transparent true}})
 
-(def door-closed-tile
-  (make-tile :door-closed \+ :yellow {:walkable false :transparent false}))
-
-(def door-open-tile
-  (make-tile :door-open \/ :yellow {:walkable true :transparent true}))
-
-(def water-tile
-  (make-tile :water \~ :blue {:walkable false :transparent true}))
+(defn register-default-tile-types
+  "Registers the default tile types (:floor, :wall, :door-closed, :door-open, :water)
+   into the given registry."
+  [registry]
+  (reduce-kv (fn [reg k v] (define-tile-type reg k v))
+             registry default-tile-types))
 
 (defn tile-char
-  "Returns the display character for a tile."
-  [tile]
-  (:char tile \?))
+  "Returns the display character for a tile. Checks instance, then type registry."
+  [registry tile]
+  (or (:char tile) (get-type-property registry :tile (:type tile) :char) \?))
 
 (defn tile-color
-  "Returns the display color for a tile."
-  [tile]
-  (:color tile :white))
+  "Returns the display color for a tile. Checks instance, then type registry."
+  [registry tile]
+  (or (:color tile) (get-type-property registry :tile (:type tile) :color) :white))
 
 (defn walkable?
   "Returns true if the mover can walk through the tile.
-   Checks the tile's :walkable property first, then the mover's special abilities.
-   For example, a mover with :can-swim can walk on water tiles."
-  [mover tile]
-  (let [base-walkable (:walkable tile false)]
+   Checks instance :walkable first, then type registry, then mover's special abilities."
+  [registry mover tile]
+  (let [base-walkable (if (contains? tile :walkable)
+                        (:walkable tile)
+                        (get-type-property registry :tile (:type tile) :walkable))]
     (if base-walkable
       true
-      ;; Check for special abilities that might allow movement
       (cond
-        ;; Entities with :can-swim can traverse water
         (and (:can-swim mover) (= :water (:type tile))) true
-        ;; Default to not walkable
         :else false))))
 
 (defn transparent?
-  "Returns true if the tile can be seen through."
-  [tile]
-  (:transparent tile false))
+  "Returns true if the tile can be seen through. Checks instance, then type registry."
+  [registry tile]
+  (if (contains? tile :transparent)
+    (:transparent tile)
+    (or (get-type-property registry :tile (:type tile) :transparent) false)))
 
 (def default-tile floor-tile)
 
@@ -231,7 +239,7 @@
   "Scans one octant for shadow casting FOV.
    transform-fn maps (row, col) to (dx, dy) relative to origin.
    Adds visible [x y] coords to the visible set atom."
-  [game-map ox oy radius transform-fn visible]
+  [registry game-map ox oy radius transform-fn visible]
   (let [max-dist (or radius (max (map-width game-map) (map-height game-map)))]
     (loop [row 1
            shadows []]
@@ -251,7 +259,7 @@
                         end-slope (/ (+ col 0.5) row)
                         in-shadow (some (fn [[s e]] (and (>= center-slope s) (<= center-slope e)))
                                         @new-shadows)
-                        opaque (not (transparent? (get-tile game-map x y)))]
+                        opaque (not (transparent? registry (get-tile game-map x y)))]
                     (vreset! any-in-bounds true)
                     (when-not in-shadow
                       (swap! visible conj [x y]))
@@ -288,22 +296,22 @@
   "Computes field of view from origin (ox, oy) using shadow casting.
    Optional radius limits visible distance (Chebyshev distance).
    Returns a set of visible [x y] coordinate pairs."
-  ([game-map ox oy] (compute-fov game-map ox oy nil))
-  ([game-map ox oy radius]
+  ([registry game-map ox oy] (compute-fov registry game-map ox oy nil))
+  ([registry game-map ox oy radius]
    (let [visible (atom #{[ox oy]})]
      (doseq [transform octant-transforms]
-       (scan-octant game-map ox oy radius transform visible))
+       (scan-octant registry game-map ox oy radius transform visible))
      @visible)))
 
 (defn compute-entity-fov
   "Computes field of view for an entity using its position and view-radius.
    If entity has no view-radius, computes unlimited FOV."
-  [game-map entity]
+  [registry game-map entity]
   (let [[x y] (:pos entity)
         r (:view-radius entity)]
     (if r
-      (compute-fov game-map x y r)
-      (compute-fov game-map x y))))
+      (compute-fov registry game-map x y r)
+      (compute-fov registry game-map x y))))
 
 ;; Entities
 
@@ -511,12 +519,12 @@
   "Attempts to move entity by dx,dy. Only moves if new position is in bounds and walkable.
    Returns an action-result: {:map updated-map} on success,
    {:map game-map :no-time true :retry true} on failure."
-  [game-map entity dx dy]
+  [registry game-map entity dx dy]
   (let [[x y] (entity-pos entity)
         new-x (+ x dx)
         new-y (+ y dy)
         in-map (in-bounds? game-map new-x new-y)
-        can-walk (and in-map (walkable? entity (get-tile game-map new-x new-y)))]
+        can-walk (and in-map (walkable? registry entity (get-tile game-map new-x new-y)))]
     (if can-walk
       {:map (update-entity game-map entity move-entity-by dx dy)}
       {:map game-map :no-time true :retry true})))
@@ -529,10 +537,10 @@
 
 (defn execute-action
   "Executes a world action (movement), returning an action-result map.
-   Player-only actions (:look, :quit) are handled in make-player-act."
-  [action entity game-map]
+   Player-only actions (:look, :quit) are handled in player-act."
+  [registry action entity game-map]
   (if-let [[dx dy] (direction-deltas action)]
-    (try-move game-map entity dx dy)
+    (try-move registry game-map entity dx dy)
     {:map game-map}))
 
 (defn- in-look-bounds?
@@ -623,7 +631,7 @@
 
           ;; World action (movement etc.)
           action
-          (let [result (execute-action action entity game-map)]
+          (let [result (execute-action registry action entity game-map)]
             (if (:retry result)
               (recur)
               result))

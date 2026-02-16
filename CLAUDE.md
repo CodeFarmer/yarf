@@ -41,6 +41,8 @@ Types define shared immutable properties (description, lore, etc.) for entities 
 
 **Type `:act` property:** Entity types register their `:act` function in the type registry. The registry is the single source of truth for entity behavior — entities themselves never carry `:act`. Act functions are looked up from the registry via the entity's `:type` at runtime. This means save/load is trivial (no stripping/restoring needed).
 
+**Tile display/behavior properties:** Tile types register `:char`, `:color`, `:walkable`, `:transparent` in the type registry. Tile instances on the map are minimal (`{:type :floor}`) — display and behavior properties are looked up from the registry at runtime. Instance properties override type properties. Use `register-default-tile-types` to register the standard five tile types.
+
 **Type inheritance:** Types can have `:parent` for single inheritance. Property lookup walks up the chain until found.
 
 ```clojure
@@ -61,13 +63,15 @@ Maps use a flat vector for tile storage with coordinate-to-index conversion.
 
 ### Tiles
 
-Tiles are maps with `:type`, `:char`, `:color`, and properties (`:walkable`, `:transparent`).
+Tile instances on the map are minimal (just `{:type :floor}`). Display and behavior properties (`:char`, `:color`, `:walkable`, `:transparent`) live in the type registry and are looked up at runtime. Individual tiles can override via instance properties.
 
-- `make-tile [type char color properties]` - create custom tiles
-- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`
-- `tile-char` / `tile-color` - display accessors (char and color are core game data)
-- `walkable? [mover tile]` - checks if mover can traverse tile (considers entity abilities)
-- `transparent?` - property accessor
+- `make-tile [tile-type]` or `[tile-type properties]` - create tile (properties are instance overrides)
+- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile` — all minimal `{:type <key>}` maps
+- `default-tile-types` - map of default tile type definitions with display/behavior properties
+- `register-default-tile-types [registry]` - registers `:floor`, `:wall`, `:door-closed`, `:door-open`, `:water` types
+- `tile-char [registry tile]` / `tile-color [registry tile]` - display accessors (instance, then type registry)
+- `walkable? [registry mover tile]` - checks if mover can traverse tile (instance, then registry, then abilities)
+- `transparent? [registry tile]` - opacity accessor (instance, then type registry)
 
 ### Entities (`yarf.core`)
 
@@ -125,11 +129,11 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 **Key mappings (`yarf.core`):**
 - `default-key-map` - vi-style: `hjkl` cardinal, `yubn` diagonal, `x` look
 - `direction-deltas` - maps movement actions to `[dx dy]` vectors (e.g. `:move-up` -> `[0 -1]`)
-- `execute-action [action entity map]` - executes movement actions via `direction-deltas`; returns action-result
+- `execute-action [registry action entity map]` - executes movement actions via `direction-deltas`; returns action-result
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
-- `try-move [map entity dx dy]` - safe movement with bounds and walkability checks; returns action-result
+- `try-move [registry map entity dx dy]` - safe movement with bounds and walkability checks; returns action-result
 - Use `try-move` for all map-aware movement (players and NPCs)
 - Entities cannot move off map edges or into unwalkable tiles
 - Failed moves return `{:map game-map :no-time true :retry true}`
@@ -181,8 +185,8 @@ The `:map` key always contains the game map (clean, no flags embedded).
 
 Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed doors) are visible but block tiles behind them. Uses `transparent?` for opacity and **Chebyshev distance** for radius (square-shaped FOV).
 
-- `compute-fov [map ox oy]` or `[map ox oy radius]` - returns `#{[x y] ...}` set of visible coordinates from origin; nil radius = unlimited (bounded by map size)
-- `compute-entity-fov [map entity]` - uses entity's `:pos` and `:view-radius` (nil = unlimited)
+- `compute-fov [registry map ox oy]` or `[registry map ox oy radius]` - returns `#{[x y] ...}` set of visible coordinates from origin; nil radius = unlimited (bounded by map size)
+- `compute-entity-fov [registry map entity]` - uses entity's `:pos` and `:view-radius` (nil = unlimited)
 
 ### Save/Load (`yarf.core`)
 
@@ -205,7 +209,7 @@ Saves game state as gzipped EDN. Since entities don't carry `:act` functions (be
 
 **Display protocol:**
 - `get-input` - get input (blocking)
-- `render-tile [this x y tile]` / `render-entity [this x y entity]`
+- `render-tile [this x y tile registry]` / `render-entity [this x y entity]`
 - `clear-screen` / `refresh-screen` - screen management
 - `start-display` / `stop-display` - lifecycle
 - `display-message [this message]` - show message in message bar
@@ -253,7 +257,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
 - Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
-- Consider later: have entities link directly to their type at runtime (deferred to see if useful).
+- Consider later: have entities and tiles hold a direct reference to their type at runtime, to avoid registry lookups on every access (deferred to see if it's needed).
+- Consider later: whether tiles in the map vector can be bare type keywords (e.g. `:floor` instead of `{:type :floor}`), saving even more space. Would need tiles with instance overrides to remain maps.
 - Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
 
 ## Development Notes

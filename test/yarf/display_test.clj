@@ -7,8 +7,8 @@
 (defrecord MockDisplay [input-atom rendered-atom message-atom]
   Display
   (get-input [this] @input-atom)
-  (render-tile [this x y tile]
-    (swap! rendered-atom conj {:x x :y y :char (core/tile-char tile) :color (core/tile-color tile)}))
+  (render-tile [this x y tile registry]
+    (swap! rendered-atom conj {:x x :y y :char (core/tile-char registry tile) :color (core/tile-color registry tile)}))
   (render-entity [this x y entity]
     (swap! rendered-atom conj {:x x :y y :char (core/entity-char entity) :color (core/entity-color entity)}))
   (clear-screen [this] (reset! rendered-atom []))
@@ -28,8 +28,9 @@
       (is (satisfies? Display d))
       (is (= :up (get-input d)))))
   (testing "mock display tracks rendered content"
-    (let [d (make-mock-display)]
-      (render-tile d 5 5 core/wall-tile)
+    (let [reg (core/register-default-tile-types (core/create-type-registry))
+          d (make-mock-display)]
+      (render-tile d 5 5 core/wall-tile reg)
       (is (= 1 (count @(:rendered-atom d))))
       (is (= \# (:char (first @(:rendered-atom d))))))))
 

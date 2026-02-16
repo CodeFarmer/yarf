@@ -16,27 +16,31 @@
 
 (defn goblin-wander
   "Act function for goblins: wander randomly."
-  [entity game-map _ctx]
+  [entity game-map ctx]
   (let [dx (- (rand-int 3) 1)
         dy (- (rand-int 3) 1)]
-    (core/try-move game-map entity dx dy)))
+    (core/try-move (:registry ctx) game-map entity dx dy)))
 
 (defn create-demo-registry
-  "Creates a type registry for the demo with tile and entity descriptions."
+  "Creates a type registry for the demo with tile and entity descriptions.
+   Starts with default tile types, then overrides :floor, :wall, :water
+   to add names and descriptions."
   []
   (-> (core/create-type-registry)
+      (core/register-default-tile-types)
       (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."
                                         :act core/player-act})
       (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."
                                         :act goblin-wander})
-      (core/define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."})
-      (core/define-tile-type :wall {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
-      (core/define-tile-type :water {:name "Water" :description "Dark, still water."})))
+      ;; Override defaults to add names/descriptions (merge with existing properties)
+      (update-in [:tile :floor] merge {:name "Stone Floor" :description "Cold grey stone."})
+      (update-in [:tile :wall] merge {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
+      (update-in [:tile :water] merge {:name "Water" :description "Dark, still water."})))
 
 (defn render-game
   "Renders the game to the screen. fov is the set of currently visible coords,
    explored is the set of previously seen coords."
-  [screen game-map viewport message fov explored]
+  [screen game-map viewport message fov explored registry]
   (s/clear screen)
   (let [{:keys [width height offset-x offset-y]} viewport]
     ;; Render tiles
@@ -48,10 +52,10 @@
           (let [tile (core/get-tile game-map wx wy)]
             (cond
               (fov [wx wy])
-              (s/put-string screen sx sy (str (core/tile-char tile))
-                            {:fg (core/tile-color tile)})
+              (s/put-string screen sx sy (str (core/tile-char registry tile))
+                            {:fg (core/tile-color registry tile)})
               (explored [wx wy])
-              (s/put-string screen sx sy (str (core/tile-char tile))
+              (s/put-string screen sx sy (str (core/tile-char registry tile))
                             {:fg :blue}))))))
     ;; Render entities (only if in FOV)
     (doseq [entity (core/get-entities game-map)]
@@ -78,12 +82,12 @@
 
 (defn render-look-frame
   "Renders the game with a highlighted cursor at (cx, cy) and look info in message bar."
-  [screen game-map viewport cx cy look-info fov explored]
+  [screen game-map viewport cx cy look-info fov explored registry]
   (let [{:keys [width height offset-x offset-y]} viewport
         sx (- cx offset-x)
         sy (- cy offset-y)]
     ;; Render normal game frame with look name as message
-    (render-game screen game-map viewport (:name look-info) fov explored)
+    (render-game screen game-map viewport (:name look-info) fov explored registry)
     ;; Position cursor on examined square
     (when (and (>= sx 0) (< sx width)
                (>= sy 0) (< sy height))
@@ -93,14 +97,14 @@
 (defn demo-on-look-move
   "Look-mode callback: renders the game with cursor at (cx, cy)."
   [ctx game-map cx cy look-info]
-  (let [{:keys [screen viewport explored]} ctx
+  (let [{:keys [screen viewport explored registry]} ctx
         player (core/get-player game-map)
         [px py] (core/entity-pos player)
         vp (-> viewport
                (display/center-viewport-on px py)
                (display/clamp-to-map game-map))
-        fov (core/compute-entity-fov game-map player)]
-    (render-look-frame screen game-map vp cx cy look-info fov explored)))
+        fov (core/compute-entity-fov registry game-map player)]
+    (render-look-frame screen game-map vp cx cy look-info fov explored registry)))
 
 (defn demo-look-bounds-fn
   "Look-mode bounds callback: constrains cursor to viewport."
@@ -146,25 +150,26 @@
 (defn game-loop
   "Main game loop. Threads explored state as a plain set through ctx."
   [screen initial-map base-ctx initial-explored]
-  (loop [game-map initial-map
-         message nil
-         explored (or initial-explored #{})]
-    (let [player (core/get-player game-map)
-          fov (core/compute-entity-fov game-map player)
-          explored (into explored fov)
-          vp (center-viewport-on-player game-map (:viewport base-ctx))]
-      (render-game screen game-map vp message fov explored)
-      (let [ctx (assoc base-ctx :explored explored)
-            result (core/process-actors game-map ctx)
-            {:keys [map quit message action]} result]
-        (cond
-          quit :quit
-          (= :save action)
-          (do (core/save-game save-file map {:explored explored
-                                             :viewport (:viewport base-ctx)})
-              (recur map "Game saved." explored))
-          :else
-          (recur map message explored))))))
+  (let [registry (:registry base-ctx)]
+    (loop [game-map initial-map
+           message nil
+           explored (or initial-explored #{})]
+      (let [player (core/get-player game-map)
+            fov (core/compute-entity-fov registry game-map player)
+            explored (into explored fov)
+            vp (center-viewport-on-player game-map (:viewport base-ctx))]
+        (render-game screen game-map vp message fov explored registry)
+        (let [ctx (assoc base-ctx :explored explored)
+              result (core/process-actors game-map ctx)
+              {:keys [map quit message action]} result]
+          (cond
+            quit :quit
+            (= :save action)
+            (do (core/save-game save-file map {:explored explored
+                                               :viewport (:viewport base-ctx)})
+                (recur map "Game saved." explored))
+            :else
+            (recur map message explored)))))))
 
 (defn- load-saved-game
   "Attempts to load a saved game. Returns {:game-map m :explored e} or nil."
