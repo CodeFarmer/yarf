@@ -421,10 +421,10 @@
 
 ;; Entity actions
 
-(defn can-act?
-  "Returns true if the entity has an act function."
-  [entity]
-  (fn? (:act entity)))
+(defn- can-act?
+  "Returns true if the entity's type has an :act function in the registry."
+  [registry entity]
+  (some? (get-type-property registry :entity (:type entity) :act)))
 
 (defn- increment-next-action
   "Increments an entity's next-action by the given time, or its delay if not specified."
@@ -433,20 +433,19 @@
    (assoc entity :next-action (+ (entity-next-action entity) time))))
 
 (defn- find-acted-entity
-  "Finds the entity that acted by matching type and act function."
+  "Finds the entity that acted by matching type."
   [entities original-entity]
-  (first (filter #(and (= (:type %) (:type original-entity))
-                       (= (:act %) (:act original-entity)))
+  (first (filter #(= (:type %) (:type original-entity))
                  entities)))
 
 (defn act-entity
-  "Calls the entity's act function if it has one.
+  "Calls the entity's act function if it has one (looked up from registry in ctx).
    The act function receives (entity, game-map, ctx) and returns an action-result map
    {:map updated-map, optional :time-cost, :no-time, :retry, :quit, :message}.
    After acting, the entity's next-action is incremented by :time-cost
    if present, otherwise by its delay. If :no-time is set, no increment occurs."
   [tile-map entity ctx]
-  (if-let [act-fn (:act entity)]
+  (if-let [act-fn (get-type-property (:registry ctx) :entity (:type entity) :act)]
     (let [result (act-fn entity tile-map ctx)
           {:keys [map no-time time-cost]} result
           acted-entity (find-acted-entity (get-entities map) entity)
@@ -458,11 +457,11 @@
       (assoc result :map updated-map))
     {:map tile-map}))
 
-(defn get-next-actor
+(defn- get-next-actor
   "Returns the entity with the lowest next-action value that can act, or nil if none."
-  [tile-map]
+  [tile-map registry]
   (->> (get-entities tile-map)
-       (filter can-act?)
+       (filter #(can-act? registry %))
        (sort-by entity-next-action)
        first))
 
@@ -470,7 +469,7 @@
   "Processes only the entity with the lowest next-action value.
    Returns an action-result map."
   [tile-map ctx]
-  (if-let [actor (get-next-actor tile-map)]
+  (if-let [actor (get-next-actor tile-map (:registry ctx))]
     (act-entity tile-map actor ctx)
     {:map tile-map}))
 
@@ -478,19 +477,20 @@
   "Processes all entities that have act functions.
    Returns an action-result map with :map, and accumulated :quit/:message flags."
   [tile-map ctx]
-  (reduce (fn [accum entity]
-            (let [current-map (:map accum)]
-              (if (can-act? entity)
-                ;; Re-fetch entity from map in case it was modified
-                (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
-                  (let [result (act-entity current-map current ctx)]
-                    (cond-> {:map (:map result)}
-                      (or (:quit accum) (:quit result))       (assoc :quit true)
-                      (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))))
-                  accum)
-                accum)))
-          {:map tile-map}
-          (get-entities tile-map)))
+  (let [registry (:registry ctx)]
+    (reduce (fn [accum entity]
+              (let [current-map (:map accum)]
+                (if (can-act? registry entity)
+                  ;; Re-fetch entity from map in case it was modified
+                  (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
+                    (let [result (act-entity current-map current ctx)]
+                      (cond-> {:map (:map result)}
+                        (or (:quit accum) (:quit result))       (assoc :quit true)
+                        (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))))
+                    accum)
+                  accum)))
+            {:map tile-map}
+            (get-entities tile-map))))
 
 ;; Player input handling
 
@@ -633,34 +633,19 @@
 
 ;; Save/Load
 
-(defn restore-act-functions
-  "Restores :act functions on entities from the type registry.
-   Each entity's :type is looked up in the registry; if an :act property
-   is found, it's assoc'd onto the entity."
-  [game-map registry]
-  (update game-map :entities
-    (fn [entities]
-      (mapv (fn [entity]
-              (if-let [act-fn (get-type-property registry :entity (:type entity) :act)]
-                (assoc entity :act act-fn)
-                entity))
-            entities))))
-
 (defn prepare-save-data
-  "Prepares game state for saving. Strips :act from entities and adds version.
+  "Prepares game state for saving. Adds version.
    save-state is a map of additional keys to include (e.g. :explored, :viewport)."
   [game-map save-state]
-  (let [stripped (update game-map :entities (fn [es] (mapv #(dissoc % :act) es)))]
-    (merge {:version 1 :game-map stripped} save-state)))
+  (merge {:version 1 :game-map game-map} save-state))
 
 (defn restore-save-data
-  "Restores save data by re-attaching act functions from the registry.
-   Throws on unsupported version."
-  [save-data registry]
+  "Restores save data. Throws on unsupported version."
+  [save-data]
   (when-not (= 1 (:version save-data))
     (throw (ex-info (str "Unsupported save version: " (:version save-data))
                     {:version (:version save-data)})))
-  (update save-data :game-map restore-act-functions registry))
+  save-data)
 
 (defn save-game
   "Saves game state to a gzipped EDN file."
@@ -673,12 +658,12 @@
       (.write out (pr-str save-data)))))
 
 (defn load-game
-  "Loads game state from a gzipped EDN file, restoring act functions from registry."
-  [file-path registry]
+  "Loads game state from a gzipped EDN file."
+  [file-path]
   (let [save-data (with-open [in (-> (FileInputStream. ^String file-path)
                                      (GZIPInputStream.)
                                      (InputStreamReader. "UTF-8")
                                      (BufferedReader.)
                                      (PushbackReader.))]
                     (edn/read in))]
-    (restore-save-data save-data registry)))
+    (restore-save-data save-data)))

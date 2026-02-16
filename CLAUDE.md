@@ -39,7 +39,7 @@ Types define shared immutable properties (description, lore, etc.) for entities 
 - `get-instance-type-property [registry instance property]` - get type property from instance
 - `get-property [registry instance property]` - instance value, falling back to type
 
-**Type `:act` property:** Entity types can register an `:act` function. This is used by save/load to strip act functions on save and restore them on load via `restore-act-functions`. Act functions must be named (not anonymous closures) for this to work.
+**Type `:act` property:** Entity types register their `:act` function in the type registry. The registry is the single source of truth for entity behavior — entities themselves never carry `:act`. Act functions are looked up from the registry via the entity's `:type` at runtime. This means save/load is trivial (no stripping/restoring needed).
 
 **Type inheritance:** Types can have `:parent` for single inheritance. Property lookup walks up the chain until found.
 
@@ -101,17 +101,16 @@ Act functions receive `(entity, game-map, ctx)` and return an **action-result** 
 }
 ```
 
-- `can-act? [entity]` - true if entity has `:act` function
-- `act-entity [map entity ctx]` - calls entity's act fn with ctx, processes timing, returns action-result
+- `act-entity [map entity ctx]` - looks up act fn from `(:registry ctx)`, calls it with ctx, processes timing, returns action-result
 - `process-actors [map ctx]` - processes all actors, returns action-result with accumulated flags
 - `process-next-actor [map ctx]` - processes next actor, returns action-result
 - `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn` from ctx
 
 **Context (ctx):**
-A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys used by `player-act` and `look-mode`:
+A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys:
+- `:registry` - type registry (required — used for act dispatch, look-at, etc.)
 - `:input-fn` - blocking input function `(fn [] key)` (required for player)
 - `:key-map` - maps input keys to actions (required for player)
-- `:registry` - type registry for look-at (enables look mode)
 - `:on-look-move` - `(fn [ctx game-map cx cy look-info])` callback during look mode
 - `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
 - `:pass-through-actions` - set of action keywords that `player-act` returns as `{:action <keyword>}` for the game loop to handle (e.g. `#{:save}`)
@@ -120,7 +119,6 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 **Action timing:**
 - `entity-delay` - default ticks between actions (default 10). Lower = faster.
 - `entity-next-action` - tick when entity can act next (default 0)
-- `get-next-actor [map]` - returns entity with lowest next-action
 - After acting, `next-action` is incremented by `:time-cost` if present, otherwise by entity's `delay`
 - Actions can return `:time-cost N` to specify custom time cost (e.g., quick attack = 5, heavy attack = 20)
 
@@ -188,23 +186,20 @@ Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed 
 
 ### Save/Load (`yarf.core`)
 
-Saves game state as gzipped EDN. Act functions are stripped on save and restored from the type registry on load.
+Saves game state as gzipped EDN. Since entities don't carry `:act` functions (behavior lives in the registry), save/load is straightforward — no stripping or restoring needed.
 
-- `restore-act-functions [game-map registry]` - restores `:act` on entities from registry by `:type`
-- `prepare-save-data [game-map save-state]` - strips `:act`, adds `:version 1`, merges save-state (e.g. `:explored`, `:viewport`)
-- `restore-save-data [save-data registry]` - restores act functions; throws on unsupported version
+- `prepare-save-data [game-map save-state]` - adds `:version 1`, merges save-state (e.g. `:explored`, `:viewport`)
+- `restore-save-data [save-data]` - validates version; throws on unsupported version
 - `save-game [file-path game-map save-state]` - writes gzipped EDN to file
-- `load-game [file-path registry]` - reads gzipped EDN, restores act functions, returns `{:version :game-map :explored ...}`
+- `load-game [file-path]` - reads gzipped EDN, validates version, returns `{:version :game-map :explored ...}`
 
 **Save data format:**
 ```clojure
 {:version 1
- :game-map <map-with-act-stripped>
+ :game-map <game-map>
  :explored #{[x y] ...}    ;; game-specific
  :viewport {...}}           ;; game-specific
 ```
-
-**Requirements for save/load:** Entity act functions must be named functions (not anonymous closures) and registered as `:act` on their entity type in the type registry.
 
 ### Display (`yarf.display`)
 
@@ -237,8 +232,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
 - `Shift-S` to save game (writes `yarf-save.dat` in working directory)
 - On startup, prompts to load if a save file exists
-- Player and two wandering goblins (named `goblin-wander` act function)
-- Type registry with tile/entity names, descriptions, and `:act` functions for save/load support
+- Player and two wandering goblins (named `goblin-wander` act function in registry)
+- Type registry with tile/entity names, descriptions, and `:act` functions
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
 - Swing screen sized to fit viewport + message bar
@@ -258,6 +253,7 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
 - Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
+- Consider later: have entities link directly to their type at runtime (deferred to see if useful).
 - Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
 
 ## Development Notes

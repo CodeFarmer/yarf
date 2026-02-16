@@ -116,16 +116,14 @@
      (+ offset-y (dec height))]))
 
 (defn create-demo-player
-  "Creates a player for the demo. Uses player-act with ctx."
+  "Creates a player for the demo."
   [x y]
-  (core/create-entity :player \@ :yellow x y
-                      {:act core/player-act}))
+  (core/create-entity :player \@ :yellow x y))
 
 (defn create-wandering-goblin
   "Creates a goblin that wanders randomly."
   [x y]
-  (core/create-entity :goblin \g :green x y
-                      {:act goblin-wander}))
+  (core/create-entity :goblin \g :green x y))
 
 (defn create-demo-game
   "Creates a demo game state."
@@ -170,13 +168,13 @@
 
 (defn- load-saved-game
   "Attempts to load a saved game. Returns {:game-map m :explored e} or nil."
-  [registry]
+  []
   (when (.exists (java.io.File. save-file))
     (println "Save file found. Load it? (y/n)")
     (let [answer (read-line)]
       (when (= "y" (.toLowerCase (.trim answer)))
         (try
-          (let [restored (core/load-game save-file registry)]
+          (let [restored (core/load-game save-file)]
             (println "Game loaded.")
             {:game-map (:game-map restored)
              :explored (:explored restored)})
@@ -193,7 +191,7 @@
   (println "Save: Shift-S")
   (println "Quit: q or ESC")
   (let [registry (create-demo-registry)
-        loaded (load-saved-game registry)
+        loaded (load-saved-game)
         _ (when-not loaded
             (println "Press Enter to start...")
             (read-line))

@@ -484,39 +484,37 @@
 ;; Entity act function tests
 
 (deftest entity-act-test
-  (testing "entities can have an act function"
+  (testing "act-entity calls act function from registry"
     (let [wander-fn (fn [entity game-map _ctx]
                       {:map (update-entity game-map entity move-entity-by 1 0)})
-          e (create-entity :goblin \g :green 5 5 {:act wander-fn})
-          m (-> (create-tile-map 10 10)
-                (add-entity e))]
-      (is (can-act? e))
-      (is (not (can-act? (create-player 0 0))))))
-  (testing "act-entity calls entity's act function"
-    (let [wander-fn (fn [entity game-map _ctx]
-                      {:map (update-entity game-map entity move-entity-by 1 0)})
-          e (create-entity :goblin \g :green 5 5 {:act wander-fn})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act wander-fn}))
+          e (create-entity :goblin \g :green 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e {})]
+          result (act-entity m e {:registry registry})]
       (is (= 6 (first (entity-pos (first (get-entities (:map result)))))))))
-  (testing "act-entity returns unchanged map for entities without act"
-    (let [p (create-player 5 5)
+  (testing "act-entity returns unchanged map for entities without act in registry"
+    (let [registry (create-type-registry)
+          p (create-player 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          result (act-entity m p {})]
+          result (act-entity m p {:registry registry})]
       (is (= m (:map result))))))
 
 (deftest process-actors-test
-  (testing "processes all entities with act functions"
+  (testing "processes all entities with act functions in registry"
     (let [move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
-          e1 (create-entity :goblin \g :green 3 3 {:act move-right})
-          e2 (create-entity :orc \o :green 7 7 {:act move-right})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act move-right})
+                       (define-entity-type :orc {:act move-right}))
+          e1 (create-entity :goblin \g :green 3 3)
+          e2 (create-entity :orc \o :green 7 7)
           m (-> (create-tile-map 10 10)
                 (add-entity e1)
                 (add-entity e2))
-          result (process-actors m {})]
+          result (process-actors m {:registry registry})]
       (is (= 1 (count (get-entities-at (:map result) 4 3))))
       (is (= 1 (count (get-entities-at (:map result) 8 7)))))))
 
@@ -544,76 +542,107 @@
   (testing "acting increments next-action by delay"
     (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)})
-          e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act act-fn}))
+          e (create-entity :goblin \g :green 5 5 {:delay 15})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e {})
+          result (act-entity m e {:registry registry})
           updated (first (get-entities (:map result)))]
       (is (= 15 (entity-next-action updated)))))
   (testing "acting uses default delay when not specified"
     (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)})
-          e (create-entity :goblin \g :green 5 5 {:act act-fn})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act act-fn}))
+          e (create-entity :goblin \g :green 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e {})
+          result (act-entity m e {:registry registry})
           updated (first (get-entities (:map result)))]
       (is (= 10 (entity-next-action updated)))))
   (testing "action can specify custom :time-cost"
     (let [act-fn (fn [entity game-map _ctx]
                    {:map (update-entity game-map entity move-entity-by 1 0)
                     :time-cost 5})
-          e (create-entity :goblin \g :green 5 5 {:act act-fn :delay 15})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act act-fn}))
+          e (create-entity :goblin \g :green 5 5 {:delay 15})
           m (-> (create-tile-map 10 10)
                 (add-entity e))
-          result (act-entity m e {})
+          result (act-entity m e {:registry registry})
           updated (first (get-entities (:map result)))]
       (is (= 5 (entity-next-action updated)))))
   (testing ":time-cost overrides entity delay"
     (let [slow-action (fn [entity game-map _ctx]
                         {:map (update-entity game-map entity move-entity-by 1 0)
                          :time-cost 50})
-          fast-entity (create-entity :rat \r :white 5 5 {:act slow-action :delay 2})
+          registry (-> (create-type-registry)
+                       (define-entity-type :rat {:act slow-action}))
+          fast-entity (create-entity :rat \r :white 5 5 {:delay 2})
           m (-> (create-tile-map 10 10)
                 (add-entity fast-entity))
-          result (act-entity m fast-entity {})
+          result (act-entity m fast-entity {:registry registry})
           updated (first (get-entities (:map result)))]
       ;; Even though entity has delay 2, action took 50
       (is (= 50 (entity-next-action updated))))))
 
 (deftest next-actor-test
-  (testing "get-next-actor returns entity with lowest next-action"
-    (let [e1 (create-entity :goblin \g :green 0 0 {:act identity :next-action 20})
-          e2 (create-entity :orc \o :green 1 1 {:act identity :next-action 5})
-          e3 (create-entity :troll \T :green 2 2 {:act identity :next-action 15})
+  (testing "process-next-actor processes entity with lowest next-action"
+    (let [move-right (fn [entity game-map _ctx]
+                       {:map (update-entity game-map entity move-entity-by 1 0)})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act move-right})
+                       (define-entity-type :orc {:act move-right})
+                       (define-entity-type :troll {:act move-right}))
+          e1 (create-entity :goblin \g :green 0 0 {:next-action 20})
+          e2 (create-entity :orc \o :green 1 1 {:next-action 5})
+          e3 (create-entity :troll \T :green 2 2 {:next-action 15})
           m (-> (create-tile-map 10 10)
                 (add-entity e1)
                 (add-entity e2)
-                (add-entity e3))]
-      (is (= :orc (entity-type (get-next-actor m))))))
-  (testing "get-next-actor returns nil when no actors"
-    (let [e (create-entity :rock \* :gray 0 0)  ;; no act function
+                (add-entity e3))
+          result (process-next-actor m {:registry registry})]
+      ;; Orc had lowest next-action (5), so it moved right
+      (is (= 1 (count (get-entities-at (:map result) 2 1))))
+      ;; Others stayed
+      (is (= 1 (count (get-entities-at (:map result) 0 0))))
+      (is (= 1 (count (get-entities-at (:map result) 2 2))))))
+  (testing "process-next-actor returns unchanged map when no actors in registry"
+    (let [registry (create-type-registry)
+          e (create-entity :rock \* :gray 0 0)
           m (-> (create-tile-map 10 10)
-                (add-entity e))]
-      (is (nil? (get-next-actor m)))))
-  (testing "get-next-actor only considers entities with act functions"
-    (let [rock (create-entity :rock \* :gray 0 0 {:next-action 0})  ;; lowest but can't act
-          goblin (create-entity :goblin \g :green 1 1 {:act identity :next-action 10})
+                (add-entity e))
+          result (process-next-actor m {:registry registry})]
+      (is (= m (:map result)))))
+  (testing "process-next-actor only considers entities with act in registry"
+    (let [move-right (fn [entity game-map _ctx]
+                       {:map (update-entity game-map entity move-entity-by 1 0)})
+          registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:act move-right}))
+          rock (create-entity :rock \* :gray 0 0 {:next-action 0})  ;; lowest but no act
+          goblin (create-entity :goblin \g :green 1 1 {:next-action 10})
           m (-> (create-tile-map 10 10)
                 (add-entity rock)
-                (add-entity goblin))]
-      (is (= :goblin (entity-type (get-next-actor m)))))))
+                (add-entity goblin))
+          result (process-next-actor m {:registry registry})]
+      ;; Rock stayed, goblin moved
+      (is (= 1 (count (get-entities-at (:map result) 0 0))))
+      (is (= 1 (count (get-entities-at (:map result) 2 1)))))))
 
 (deftest process-next-actor-test
   (testing "process-next-actor processes only the entity with lowest next-action"
     (let [move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
-          fast (create-entity :rat \r :white 3 3 {:act move-right :delay 5 :next-action 0})
-          slow (create-entity :turtle \t :green 7 7 {:act move-right :delay 20 :next-action 10})
+          registry (-> (create-type-registry)
+                       (define-entity-type :rat {:act move-right})
+                       (define-entity-type :turtle {:act move-right}))
+          fast (create-entity :rat \r :white 3 3 {:delay 5 :next-action 0})
+          slow (create-entity :turtle \t :green 7 7 {:delay 20 :next-action 10})
           m (-> (create-tile-map 10 10)
                 (add-entity fast)
                 (add-entity slow))
-          result (process-next-actor m {})
+          result (process-next-actor m {:registry registry})
           m2 (:map result)]
       ;; Only fast moved (it had lower next-action)
       (is (= 1 (count (get-entities-at m2 4 3))))  ;; rat moved
@@ -628,19 +657,23 @@
   (testing "player gets input from display"
     (let [input-atom (atom \l)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map default-key-map}
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
           result (act-entity m p ctx)]
       (is (= 6 (first (entity-pos (get-player (:map result))))))))
   (testing "player responds to vi-style hjkl inputs"
     (let [input-atom (atom \k)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map default-key-map}]
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}]
       ;; k = up
       (reset! input-atom \k)
       (let [result (act-entity m p ctx)]
@@ -660,10 +693,12 @@
   (testing "player responds to diagonal yubn inputs"
     (let [input-atom (atom \y)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map default-key-map}]
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}]
       ;; y = up-left
       (reset! input-atom \y)
       (let [result (act-entity m p ctx)
@@ -693,10 +728,12 @@
           input-fn #(let [i (first @inputs)]
                       (swap! inputs rest)
                       i)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map default-key-map}
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
           result (act-entity m p ctx)]
       ;; Should have moved right (the \l input) after skipping invalid inputs
       (is (= 6 (first (entity-pos (get-player (:map result))))))
@@ -706,11 +743,13 @@
           input-fn #(let [i (first @inputs)]
                       (swap! inputs rest)
                       i)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (set-tile 5 4 wall-tile)  ;; wall above player
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map default-key-map}
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
           result (act-entity m p ctx)]
       ;; Should have moved right after failing to move up twice
       (is (= 6 (first (entity-pos (get-player (:map result))))))
@@ -718,14 +757,17 @@
   (testing "process-actors includes player with ctx"
     (let [input-atom (atom \l)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
           move-right (fn [entity game-map _ctx]
                        {:map (update-entity game-map entity move-entity-by 1 0)})
-          goblin (create-entity :goblin \g :green 3 3 {:act move-right})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:act move-right}))
+          p (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 3 3)
           m (-> (create-tile-map 10 10)
                 (add-entity p)
                 (add-entity goblin))
-          ctx {:input-fn input-fn :key-map default-key-map}
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
           result (process-actors m ctx)]
       ;; both moved
       (is (= 6 (first (entity-pos (get-player (:map result))))))
@@ -753,10 +795,12 @@
                      \d :move-right}
           input-atom (atom \w)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map wasd-keys}]
+          ctx {:input-fn input-fn :key-map wasd-keys :registry registry}]
       ;; w = up
       (let [result (act-entity m p ctx)]
         (is (= 4 (second (entity-pos (get-player (:map result)))))))
@@ -770,10 +814,12 @@
                        :up :move-up}
           input-atom (atom \q)
           input-fn #(deref input-atom)
-          p (create-entity :player \@ :yellow 5 5 {:act player-act})
+          registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act}))
+          p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity p))
-          ctx {:input-fn input-fn :key-map custom-keys}
+          ctx {:input-fn input-fn :key-map custom-keys :registry registry}
           result (act-entity m p ctx)]
       (is (:quit result)))))
 
@@ -1030,12 +1076,12 @@
 (deftest player-act-look-mode-test
   (testing "with registry in ctx: enters look mode on x, returns message on Enter"
     (let [registry (-> (create-type-registry)
-                       (define-entity-type :player {:name "Player" :description "That's you."})
+                       (define-entity-type :player {:name "Player" :description "That's you." :act player-act})
                        (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
           ;; x enters look mode, then move right (away from player), then Enter selects tile
           inputs (atom [\x \l :enter])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map default-key-map :registry registry}
@@ -1047,7 +1093,7 @@
     (let [;; x (look, ignored), then l (move right)
           inputs (atom [\x \l])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map default-key-map}
@@ -1056,12 +1102,13 @@
 
   (testing "look-bounds-fn constrains cursor in look mode"
     (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
                        (define-tile-type :floor {:name "Floor" :description "Stone floor."}))
           ;; x enters look, move right 3 times (bounds stop at x=7), then Enter
           inputs (atom [\x \l \l \l :enter])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           calls (atom [])
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 50 50)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map default-key-map
@@ -1081,11 +1128,12 @@
 
   (testing "look mode escape returns to input loop"
     (let [registry (-> (create-type-registry)
+                       (define-entity-type :player {:act player-act})
                        (define-tile-type :floor {:name "Floor"}))
           ;; x enters look, escape cancels, then l moves
           inputs (atom [\x :escape \l])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map default-key-map :registry registry}
@@ -1232,7 +1280,7 @@
     (let [inputs (atom [\q])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           key-map (assoc default-key-map \q :quit)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map key-map}
@@ -1241,51 +1289,8 @@
 
 ;; Save/Load tests
 
-(defn test-act-fn
-  "A named act function for save/load testing."
-  [entity game-map _ctx]
-  {:map (update-entity game-map entity move-entity-by 1 0)})
-
-(deftest restore-act-functions-test
-  (testing "restores :act from type registry based on entity :type"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :goblin {:name "Goblin" :act test-act-fn}))
-          goblin (create-entity :goblin \g :green 5 5)
-          m (-> (create-tile-map 10 10)
-                (add-entity goblin))
-          restored (restore-act-functions m registry)
-          restored-goblin (first (get-entities restored))]
-      (is (= test-act-fn (:act restored-goblin)))))
-  (testing "leaves entities without registered :act unchanged"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :goblin {:name "Goblin"}))
-          goblin (create-entity :goblin \g :green 5 5)
-          m (-> (create-tile-map 10 10)
-                (add-entity goblin))
-          restored (restore-act-functions m registry)
-          restored-goblin (first (get-entities restored))]
-      (is (nil? (:act restored-goblin)))))
-  (testing "handles multiple entity types"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :player {:act player-act})
-                       (define-entity-type :goblin {:act test-act-fn}))
-          player (create-entity :player \@ :yellow 3 3)
-          goblin (create-entity :goblin \g :green 7 7)
-          m (-> (create-tile-map 10 10)
-                (add-entity player)
-                (add-entity goblin))
-          restored (restore-act-functions m registry)
-          entities (get-entities restored)]
-      (is (= player-act (:act (first entities))))
-      (is (= test-act-fn (:act (second entities)))))))
 
 (deftest prepare-save-data-test
-  (testing "strips :act from all entities"
-    (let [goblin (create-entity :goblin \g :green 5 5 {:act test-act-fn})
-          m (-> (create-tile-map 10 10)
-                (add-entity goblin))
-          save-data (prepare-save-data m {})]
-      (is (nil? (:act (first (get-entities (:game-map save-data))))))))
   (testing "includes :version 1"
     (let [m (create-tile-map 5 5)
           save-data (prepare-save-data m {})]
@@ -1296,8 +1301,8 @@
                                           :viewport {:width 50 :height 25}})]
       (is (= #{[1 1] [2 2]} (:explored save-data)))
       (is (= {:width 50 :height 25} (:viewport save-data)))))
-  (testing "preserves entity data other than :act"
-    (let [goblin (create-entity :goblin \g :green 5 5 {:act test-act-fn :hp 10 :delay 15})
+  (testing "preserves entity data"
+    (let [goblin (create-entity :goblin \g :green 5 5 {:hp 10 :delay 15})
           m (-> (create-tile-map 10 10)
                 (add-entity goblin))
           save-data (prepare-save-data m {})
@@ -1308,29 +1313,23 @@
       (is (= 15 (:delay saved-goblin))))))
 
 (deftest restore-save-data-test
-  (testing "restores act functions and returns full state map"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :goblin {:act test-act-fn}))
-          save-data {:version 1
+  (testing "returns full state map"
+    (let [save-data {:version 1
                      :game-map (-> (create-tile-map 10 10)
                                    (add-entity (create-entity :goblin \g :green 5 5)))
                      :explored #{[1 1]}}
-          restored (restore-save-data save-data registry)]
-      (is (= test-act-fn (:act (first (get-entities (:game-map restored))))))
+          restored (restore-save-data save-data)]
+      (is (= :goblin (:type (first (get-entities (:game-map restored))))))
       (is (= #{[1 1]} (:explored restored)))))
   (testing "throws on unsupported version"
-    (let [registry (create-type-registry)
-          save-data {:version 99 :game-map (create-tile-map 5 5)}]
+    (let [save-data {:version 99 :game-map (create-tile-map 5 5)}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
-            (restore-save-data save-data registry))))))
+            (restore-save-data save-data))))))
 
 (deftest edn-round-trip-test
   (testing "full pipeline: prepare -> EDN serialize -> deserialize -> restore"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :player {:act player-act})
-                       (define-entity-type :goblin {:act test-act-fn}))
-          player (create-entity :player \@ :yellow 5 5 {:act player-act :view-radius 8})
-          goblin (create-entity :goblin \g :green 18 6 {:act test-act-fn :delay 12 :next-action 30})
+    (let [player (create-entity :player \@ :yellow 5 5 {:view-radius 8})
+          goblin (create-entity :goblin \g :green 18 6 {:delay 12 :next-action 30})
           game-map (-> (create-tile-map 20 15)
                        (set-tile 3 3 wall-tile)
                        (add-entity player)
@@ -1339,7 +1338,7 @@
           save-data (prepare-save-data game-map {:explored explored})
           edn-str (pr-str save-data)
           parsed (edn/read-string edn-str)
-          restored (restore-save-data parsed registry)
+          restored (restore-save-data parsed)
           restored-map (:game-map restored)
           restored-player (get-player restored-map)
           restored-goblin (first (filter #(= :goblin (entity-type %)) (get-entities restored-map)))]
@@ -1354,22 +1353,17 @@
       (is (= \@ (entity-char restored-player)))
       (is (= :yellow (entity-color restored-player)))
       (is (= 8 (:view-radius restored-player)))
-      (is (= player-act (:act restored-player)))
       ;; Goblin
       (is (= [18 6] (entity-pos restored-goblin)))
       (is (= 12 (:delay restored-goblin)))
       (is (= 30 (:next-action restored-goblin)))
-      (is (= test-act-fn (:act restored-goblin)))
       ;; Explored set
       (is (= explored (:explored restored))))))
 
 (deftest save-load-game-test
   (testing "save and load round-trip via gzip file"
-    (let [registry (-> (create-type-registry)
-                       (define-entity-type :player {:act player-act})
-                       (define-entity-type :goblin {:act test-act-fn}))
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
-          goblin (create-entity :goblin \g :green 7 7 {:act test-act-fn :delay 12})
+    (let [player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 7 7 {:delay 12})
           game-map (-> (create-tile-map 15 15)
                        (set-tile 2 2 wall-tile)
                        (add-entity player)
@@ -1378,24 +1372,23 @@
           tmp-file (str (.getAbsolutePath (java.io.File/createTempFile "yarf-test" ".sav")))]
       (try
         (save-game tmp-file game-map {:explored explored})
-        (let [restored (load-game tmp-file registry)
+        (let [restored (load-game tmp-file)
               restored-map (:game-map restored)]
           (is (= 15 (map-width restored-map)))
           (is (= :wall (:type (get-tile restored-map 2 2))))
           (is (= [5 5] (entity-pos (get-player restored-map))))
-          (is (= player-act (:act (get-player restored-map))))
           (is (= explored (:explored restored))))
         (finally
           (.delete (java.io.File. tmp-file))))))
   (testing "load-game throws on nonexistent file"
     (is (thrown? java.io.FileNotFoundException
-          (load-game "/tmp/nonexistent-yarf-save.sav" (create-type-registry)))))
+          (load-game "/tmp/nonexistent-yarf-save.sav"))))
   (testing "load-game throws on corrupt file"
     (let [tmp-file (str (.getAbsolutePath (java.io.File/createTempFile "yarf-corrupt" ".sav")))]
       (try
         (spit tmp-file "this is not gzipped edn")
         (is (thrown? Exception
-              (load-game tmp-file (create-type-registry))))
+              (load-game tmp-file)))
         (finally
           (.delete (java.io.File. tmp-file)))))))
 
@@ -1404,7 +1397,7 @@
     (let [inputs (atom [\S])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           key-map (assoc default-key-map \S :save)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map key-map
@@ -1417,7 +1410,7 @@
     (let [inputs (atom [\S])
           input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
           key-map (assoc default-key-map \S :save)
-          player (create-entity :player \@ :yellow 5 5 {:act player-act})
+          player (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
                 (add-entity player))
           ctx {:input-fn input-fn :key-map key-map}
