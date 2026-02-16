@@ -223,6 +223,7 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 ## Style
 
 - **No trivial getter functions.** Entities and tiles are plain maps — access fields directly with keywords (e.g. `(:view-radius entity)`) rather than writing wrapper functions that just retrieve a single field. Only create accessor functions when they provide real value (default values, computed results, or polymorphic behavior).
+- **Prefer refactoring signatures over inserting workaround state.** When a function needs access to data it doesn't currently receive, refactor the call chain to pass it through (e.g. add a ctx parameter) rather than introducing shared mutable state (atoms, globals) or closures that capture ambient dependencies. The ctx refactor was a large retroactive fix for exactly this — design function signatures to be extensible from the start.
 
 ## TODO
 
