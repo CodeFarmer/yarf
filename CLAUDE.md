@@ -66,9 +66,10 @@ Maps use a flat vector for tile storage with coordinate-to-index conversion.
 Tile instances on the map are minimal (just `{:type :floor}`). Display and behavior properties (`:char`, `:color`, `:walkable`, `:transparent`) live in the type registry and are looked up at runtime. Individual tiles can override via instance properties.
 
 - `make-tile [tile-type]` or `[tile-type properties]` - create tile (properties are instance overrides)
-- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile` — all minimal `{:type <key>}` maps
+- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`, `stairs-down-tile`, `stairs-up-tile` — all minimal `{:type <key>}` maps
 - `default-tile-types` - map of default tile type definitions with display/behavior properties
-- `register-default-tile-types [registry]` - registers `:floor`, `:wall`, `:door-closed`, `:door-open`, `:water` types
+- `register-default-tile-types [registry]` - registers `:floor`, `:wall`, `:door-closed`, `:door-open`, `:water`, `:stairs-down`, `:stairs-up` types
+- Stair tiles: `stairs-down-tile` (`>`, white, walkable, transparent), `stairs-up-tile` (`<`, white, walkable, transparent)
 - `tile-char [registry tile]` / `tile-color [registry tile]` - display accessors (instance, then type registry)
 - `walkable? [registry mover tile]` - checks if mover can traverse tile (instance, then registry, then abilities)
 - `transparent? [registry tile]` - opacity accessor (instance, then type registry)
@@ -197,18 +198,66 @@ Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed 
 
 Saves game state as gzipped EDN. Since entities don't carry `:act` functions (behavior lives in the registry), save/load is straightforward — no stripping or restoring needed.
 
+**Single-map save (v1):**
 - `prepare-save-data [game-map save-state]` - adds `:version 1`, merges save-state (e.g. `:explored`, `:viewport`)
-- `restore-save-data [save-data]` - validates version; throws on unsupported version
 - `save-game [file-path game-map save-state]` - writes gzipped EDN to file
-- `load-game [file-path]` - reads gzipped EDN, validates version, returns `{:version :game-map :explored ...}`
 
-**Save data format:**
+**World save (v2):**
+- `prepare-world-save-data [world save-state]` - adds `:version 2`, merges save-state
+- `save-world [file-path world save-state]` - writes gzipped EDN to file
+
+**Common:**
+- `restore-save-data [save-data]` - validates version (1 or 2); throws on unsupported version
+- `load-game [file-path]` - reads gzipped EDN, validates version, returns raw data map. Caller checks `:version` to determine format.
+
+**Save v1 format (single-map):**
 ```clojure
 {:version 1
  :game-map <game-map>
  :explored #{[x y] ...}    ;; game-specific
  :viewport {...}}           ;; game-specific
 ```
+
+**Save v2 format (world):**
+```clojure
+{:version 2
+ :world {:maps {:level-1 <game-map> ...}
+         :current-map-id :level-1
+         :transitions {[:level-1 22 7] {:target-map :level-2 :target-pos [5 18]} ...}}
+ :explored {:level-1 #{[x y] ...} :level-2 #{...}}  ;; per-map explored
+ :viewport {...}}
+```
+
+### World Structure (`yarf.core`)
+
+An optional layer on top of single maps. Holds multiple named maps, transitions between them, and tracks the current active map. All existing single-map functions are unchanged — the world just wraps them.
+
+```clojure
+{:maps {:level-1 <game-map> :level-2 <game-map>}
+ :current-map-id :level-1
+ :transitions {[:level-1 22 7] {:target-map :level-2 :target-pos [5 18]}
+               [:level-2 5 18] {:target-map :level-1 :target-pos [22 7]}}}
+```
+
+**World CRUD:**
+- `create-world [maps current-map-id]` - creates world with empty transitions
+- `current-map-id [world]` - returns `:current-map-id`
+- `current-map [world]` - returns the active game-map
+- `set-current-map [world game-map]` - replaces the current map
+- `get-world-map [world map-id]` - returns a specific map
+
+**Transitions:**
+- `add-transition [world from-map x y target-map target-pos]` - one-way transition
+- `add-transition-pair [world map-a [xa ya] map-b [xb yb]]` - bidirectional pair
+- `get-transition [world map-id x y]` - look up transition at position
+- `transition-at-entity [world entity]` - look up transition at entity's pos on current map
+- `apply-transition [world entity transition]` - move entity between maps: removes from source, adds to target at target-pos, switches `current-map-id`
+
+**Design notes:**
+- Entities on non-current maps are frozen (never passed to `process-actors`)
+- Act function signature unchanged: still `(entity game-map ctx)` → `{:map updated-map}`
+- Transition triggering uses existing pass-through action pattern (e.g. `:descend`, `:ascend`)
+- The game loop handles transition actions by checking tile type + looking up transition + calling `apply-transition`
 
 ### Display (`yarf.display`)
 
@@ -235,22 +284,26 @@ Saves game state as gzipped EDN. Since entities don't carry `:act` functions (be
 
 ### Demo (`yarf.demo`)
 
-Simple game loop demonstrating the framework. Run with `lein run`.
+Two-level dungeon demo demonstrating the framework. Run with `lein run`.
 
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
+- `>` to descend stairs, `<` to ascend stairs
 - `Shift-S` to save game (writes `yarf-save.dat` in working directory)
-- On startup, prompts to load if a save file exists
-- Player and two wandering goblins (named `goblin-wander` act function in registry); both have `:blocks-movement true`
+- On startup, prompts to load if a save file exists (handles both v1 and v2 saves)
+- Two dungeon levels connected by stairs (level-1 has `>` at [22 7], level-2 has `<` at [8 18])
+- Player starts on level-1; goblins wander on each level independently
 - Bump-attack: walking into a goblin kills it instantly (via `demo-on-bump` callback on `:on-bump` in ctx)
-- Type registry with tile/entity names, descriptions, and `:act` functions
+- Type registry with tile/entity names, descriptions, and `:act` functions (including stair tile descriptions)
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
 - Swing screen sized to fit viewport + message bar
 - Invalid inputs (unknown keys, blocked moves) are retried immediately
 - FOV/fog of war: visible tiles in color, explored tiles in blue, unexplored black; entities hidden outside FOV
-- Explored state is a plain set threaded through the game loop via ctx. The `game-loop` updates `:explored` in ctx each turn; look-mode callbacks read it from ctx.
-- Uses `:pass-through-actions #{:save}` in ctx so `player-act` returns `:save` action for the game loop to handle.
+- Explored state is a per-map map (`{:level-1 #{...} :level-2 #{...}}`) threaded through the game loop via ctx. The `game-loop` updates the current map's explored set each turn; look-mode callbacks read it from ctx.
+- Uses `:pass-through-actions #{:save :descend :ascend}` in ctx so `player-act` returns these actions for the game loop to handle.
+- Message bar shows current level prefix: `[level-1] message`
+- Save uses world format (v2); load handles v1 backward compat by wrapping in a single-map world.
 
 ## Style
 
@@ -265,8 +318,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
 - Consider later: have entities and tiles hold a direct reference to their type at runtime, to avoid registry lookups on every access (deferred to see if it's needed).
 - Consider later: whether tiles in the map vector can be bare type keywords (e.g. `:floor` instead of `{:type :floor}`), saving even more space. Would need tiles with instance overrides to remain maps.
-- Add save file versioning: bump save version when game data format changes (e.g. new entity/tile properties), and handle migration from older versions in `restore-save-data`.
-- Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
+- Add save file migration: when save version changes, implement migration from older versions in `restore-save-data` (v1 -> v2 is handled by demo's `load-saved-game`, but core could offer a general migration hook).
+- Support more transition types beyond stairs: portals, zone boundaries, etc. The transition structure is generic (position-to-position mapping); game loops can define their own triggering logic.
 
 ## Development Notes
 

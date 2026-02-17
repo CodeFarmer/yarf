@@ -98,6 +98,8 @@
 (def door-closed-tile {:type :door-closed})
 (def door-open-tile {:type :door-open})
 (def water-tile {:type :water})
+(def stairs-down-tile {:type :stairs-down})
+(def stairs-up-tile {:type :stairs-up})
 
 (def default-tile-types
   "Default tile type definitions with display and behavior properties."
@@ -105,7 +107,9 @@
    :wall {:char \# :color :white :walkable false :transparent false}
    :door-closed {:char \+ :color :yellow :walkable false :transparent false}
    :door-open {:char \/ :color :yellow :walkable true :transparent true}
-   :water {:char \~ :color :blue :walkable false :transparent true}})
+   :water {:char \~ :color :blue :walkable false :transparent true}
+   :stairs-down {:char \> :color :white :walkable true :transparent true}
+   :stairs-up {:char \< :color :white :walkable true :transparent true}})
 
 (defn register-default-tile-types
   "Registers the default tile types (:floor, :wall, :door-closed, :door-open, :water)
@@ -666,9 +670,9 @@
   (merge {:version 1 :game-map game-map} save-state))
 
 (defn restore-save-data
-  "Restores save data. Throws on unsupported version."
+  "Restores save data. Accepts version 1 or 2. Throws on unsupported version."
   [save-data]
-  (when-not (= 1 (:version save-data))
+  (when-not (#{1 2} (:version save-data))
     (throw (ex-info (str "Unsupported save version: " (:version save-data))
                     {:version (:version save-data)})))
   save-data)
@@ -693,3 +697,92 @@
                                      (PushbackReader.))]
                     (edn/read in))]
     (restore-save-data save-data)))
+
+;; World structure (multi-map support)
+
+(defn create-world
+  "Creates a world with named maps and empty transitions.
+   maps is a map of map-id -> game-map. current-map-id is the active map."
+  [maps current-map-id]
+  {:maps maps
+   :current-map-id current-map-id
+   :transitions {}})
+
+(defn current-map-id
+  "Returns the id of the current map in the world."
+  [world]
+  (:current-map-id world))
+
+(defn current-map
+  "Returns the active game-map from the world."
+  [world]
+  (get-in world [:maps (:current-map-id world)]))
+
+(defn set-current-map
+  "Replaces the current map in the world."
+  [world game-map]
+  (assoc-in world [:maps (:current-map-id world)] game-map))
+
+(defn get-world-map
+  "Returns a specific map from the world by id."
+  [world map-id]
+  (get-in world [:maps map-id]))
+
+;; Transitions
+
+(defn add-transition
+  "Adds a one-way transition from (x, y) on from-map to target-pos on target-map."
+  [world from-map x y target-map target-pos]
+  (assoc-in world [:transitions [from-map x y]]
+            {:target-map target-map :target-pos target-pos}))
+
+(defn add-transition-pair
+  "Adds bidirectional transitions between two positions on different maps."
+  [world map-a [xa ya] map-b [xb yb]]
+  (-> world
+      (add-transition map-a xa ya map-b [xb yb])
+      (add-transition map-b xb yb map-a [xa ya])))
+
+(defn get-transition
+  "Looks up a transition at the given position on the given map."
+  [world map-id x y]
+  (get-in world [:transitions [map-id x y]]))
+
+(defn transition-at-entity
+  "Looks up a transition at the entity's position on the current map."
+  [world entity]
+  (let [[x y] (entity-pos entity)]
+    (get-transition world (:current-map-id world) x y)))
+
+(defn apply-transition
+  "Moves an entity from the current map to the target map via a transition.
+   Removes entity from current map, adds to target at target-pos, switches current-map-id."
+  [world entity transition]
+  (let [{:keys [target-map target-pos]} transition
+        [tx ty] target-pos
+        current-id (:current-map-id world)
+        source-map (get-in world [:maps current-id])
+        dest-map (get-in world [:maps target-map])
+        updated-entity (move-entity entity tx ty)]
+    (-> world
+        (assoc-in [:maps current-id] (remove-entity source-map entity))
+        (assoc-in [:maps target-map] (add-entity dest-map updated-entity))
+        (assoc :current-map-id target-map))))
+
+;; World Save/Load
+
+(defn prepare-world-save-data
+  "Prepares world state for saving as version 2.
+   save-state is a map of additional keys to include (e.g. :explored, :viewport)."
+  [world save-state]
+  (merge {:version 2 :world world} save-state))
+
+(defn save-world
+  "Saves world state to a gzipped EDN file."
+  [file-path world save-state]
+  (let [save-data (prepare-world-save-data world save-state)]
+    (with-open [out (-> (FileOutputStream. ^String file-path)
+                        (GZIPOutputStream.)
+                        (OutputStreamWriter. "UTF-8")
+                        (BufferedWriter.))]
+      (.write out (pr-str save-data)))))

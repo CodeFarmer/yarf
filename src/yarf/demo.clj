@@ -8,11 +8,14 @@
 (def save-file "yarf-save.dat")
 
 (def demo-key-map
-  "Key bindings for demo: vi-style movement plus quit, Shift-S to save."
+  "Key bindings for demo: vi-style movement plus quit, Shift-S to save,
+   > to descend stairs, < to ascend stairs."
   (merge core/default-key-map
          {\q :quit
           :escape :quit
-          \S :save}))
+          \S :save
+          \> :descend
+          \< :ascend}))
 
 (defn goblin-wander
   "Act function for goblins: wander randomly."
@@ -22,9 +25,7 @@
     (core/try-move (:registry ctx) game-map entity dx dy)))
 
 (defn create-demo-registry
-  "Creates a type registry for the demo with tile and entity descriptions.
-   Starts with default tile types, then overrides :floor, :wall, :water
-   to add names and descriptions."
+  "Creates a type registry for the demo with tile and entity descriptions."
   []
   (-> (core/create-type-registry)
       (core/register-default-tile-types)
@@ -35,7 +36,9 @@
       ;; Override defaults to add names/descriptions (merge with existing properties)
       (update-in [:tile :floor] merge {:name "Stone Floor" :description "Cold grey stone."})
       (update-in [:tile :wall] merge {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
-      (update-in [:tile :water] merge {:name "Water" :description "Dark, still water."})))
+      (update-in [:tile :water] merge {:name "Water" :description "Dark, still water."})
+      (update-in [:tile :stairs-down] merge {:name "Stairs Down" :description "A staircase leading down."})
+      (update-in [:tile :stairs-up] merge {:name "Stairs Up" :description "A staircase leading up."})))
 
 (defn render-game
   "Renders the game to the screen. fov is the set of currently visible coords,
@@ -136,13 +139,33 @@
   [x y]
   (core/create-entity :goblin \g :green x y))
 
-(defn create-demo-game
-  "Creates a demo game state."
+(def stairs-down-pos [22 7])
+(def stairs-up-pos [8 18])
+
+(defn create-demo-level-1
+  "Creates level 1: test map with stairs-down, player, and a goblin."
   []
-  (-> (core/generate-test-map 60 40)
-      (core/add-entity (create-demo-player 5 5))
-      (core/add-entity (create-wandering-goblin 18 6))
-      (core/add-entity (create-wandering-goblin 8 18))))
+  (let [[sx sy] stairs-down-pos]
+    (-> (core/generate-test-map 60 40)
+        (core/set-tile sx sy core/stairs-down-tile)
+        (core/add-entity (create-demo-player 5 5))
+        (core/add-entity (create-wandering-goblin 18 6)))))
+
+(defn create-demo-level-2
+  "Creates level 2: test map with stairs-up and a goblin. No player (enters via transition)."
+  []
+  (let [[sx sy] stairs-up-pos]
+    (-> (core/generate-test-map 60 40)
+        (core/set-tile sx sy core/stairs-up-tile)
+        (core/add-entity (create-wandering-goblin 8 20)))))
+
+(defn create-demo-world
+  "Creates the demo world with two levels connected by stairs."
+  []
+  (-> (core/create-world {:level-1 (create-demo-level-1)
+                           :level-2 (create-demo-level-2)}
+                          :level-1)
+      (core/add-transition-pair :level-1 stairs-down-pos :level-2 stairs-up-pos)))
 
 (defn center-viewport-on-player
   "Returns viewport centered on player."
@@ -154,29 +177,67 @@
           (display/clamp-to-map game-map)))
     viewport))
 
+(defn- stair-tile-for-action
+  "Returns the expected stair tile type for a transition action."
+  [action]
+  (case action
+    :descend :stairs-down
+    :ascend :stairs-up
+    nil))
+
+(defn- handle-transition
+  "Handles a stair transition action. Returns [world message] or nil if no stairs here."
+  [world game-map action]
+  (let [player (core/get-player game-map)
+        [px py] (core/entity-pos player)
+        tile (core/get-tile game-map px py)
+        expected-type (stair-tile-for-action action)]
+    (if (= expected-type (:type tile))
+      (if-let [transition (core/transition-at-entity world player)]
+        (let [new-world (core/apply-transition world player transition)
+              target-name (name (:target-map transition))]
+          [new-world (str "You " (if (= action :descend) "descend" "ascend")
+                          " to " target-name ".")])
+        [nil "There are no stairs here."])
+      [nil "There are no stairs here."])))
+
 (defn game-loop
-  "Main game loop. Threads explored state as a plain set through ctx."
-  [screen initial-map base-ctx initial-explored]
+  "Main game loop. Uses a world structure with per-map explored state."
+  [screen initial-world base-ctx initial-explored]
   (let [registry (:registry base-ctx)]
-    (loop [game-map initial-map
+    (loop [world initial-world
            message nil
-           explored (or initial-explored #{})]
-      (let [player (core/get-player game-map)
+           explored (or initial-explored {})]
+      (let [map-id (core/current-map-id world)
+            game-map (core/current-map world)
+            player (core/get-player game-map)
             fov (core/compute-entity-fov registry game-map player)
-            explored (into explored fov)
-            vp (center-viewport-on-player game-map (:viewport base-ctx))]
-        (render-game screen game-map vp message fov explored registry)
-        (let [ctx (assoc base-ctx :explored explored)
+            map-explored (into (get explored map-id #{}) fov)
+            explored (assoc explored map-id map-explored)
+            vp (center-viewport-on-player game-map (:viewport base-ctx))
+            level-msg (when message (str "[" (name map-id) "] " message))]
+        (render-game screen game-map vp level-msg fov map-explored registry)
+        (let [ctx (assoc base-ctx :explored map-explored)
               result (core/process-actors game-map ctx)
               {:keys [map quit message action]} result]
           (cond
             quit :quit
+
             (= :save action)
-            (do (core/save-game save-file map {:explored explored
-                                               :viewport (:viewport base-ctx)})
-                :saved)
+            (let [updated-world (core/set-current-map world map)]
+              (core/save-world save-file updated-world
+                               {:explored explored
+                                :viewport (:viewport base-ctx)})
+              :saved)
+
+            (#{:descend :ascend} action)
+            (let [[new-world msg] (handle-transition world map action)]
+              (if new-world
+                (recur new-world msg explored)
+                (recur world msg explored)))
+
             :else
-            (recur map message explored)))))))
+            (recur (core/set-current-map world map) message explored)))))))
 
 (defn- prompt-screen
   "Displays a message on the screen's message bar and waits for a key."
@@ -188,16 +249,24 @@
     (s/get-key-blocking screen)))
 
 (defn- load-saved-game
-  "Attempts to load a saved game. Returns {:game-map m :explored e} or nil."
-  [screen viewport]
+  "Attempts to load a saved game. Returns {:world w :explored e} or nil.
+   Handles both v1 (single-map) and v2 (world) save formats."
+  [screen viewport registry]
   (when (.exists (java.io.File. save-file))
     (let [key (prompt-screen screen viewport "Save file found. Load it? (y/n)")]
       (if (= \y key)
         (try
           (let [restored (core/load-game save-file)]
             (prompt-screen screen viewport "Game loaded. Press any key...")
-            {:game-map (:game-map restored)
-             :explored (:explored restored)})
+            (if (= 2 (:version restored))
+              ;; v2: world format
+              {:world (:world restored)
+               :explored (:explored restored)}
+              ;; v1: wrap single map in a world for backward compat
+              (let [game-map (:game-map restored)
+                    world (core/create-world {:level-1 game-map} :level-1)]
+                {:world world
+                 :explored {:level-1 (or (:explored restored) #{})}})))
           (catch Exception e
             (prompt-screen screen viewport (str "Failed to load: " (.getMessage e)))
             nil))
@@ -209,6 +278,7 @@
   (println "Starting YARF demo...")
   (println "Movement: hjkl (vi-style), yubn (diagonals)")
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
+  (println "Stairs: > to descend, < to ascend")
   (println "Save: Shift-S | Quit: q or ESC")
   (let [registry (create-demo-registry)
         viewport (display/create-viewport 50 25)
@@ -216,11 +286,11 @@
                                      :rows (inc (:height viewport))})]
     (s/start screen)
     (let [result (try
-                   (let [loaded (load-saved-game screen viewport)
+                   (let [loaded (load-saved-game screen viewport registry)
                          _ (when-not loaded
                              (prompt-screen screen viewport "Press any key to start..."))
-                         game-map (or (:game-map loaded) (create-demo-game))
-                         explored (or (:explored loaded) #{})
+                         world (or (:world loaded) (create-demo-world))
+                         explored (or (:explored loaded) {})
                          base-ctx {:input-fn #(s/get-key-blocking screen)
                                    :key-map demo-key-map
                                    :registry registry
@@ -229,8 +299,8 @@
                                    :on-look-move demo-on-look-move
                                    :look-bounds-fn demo-look-bounds-fn
                                    :on-bump demo-on-bump
-                                   :pass-through-actions #{:save}}]
-                     (game-loop screen game-map base-ctx explored))
+                                   :pass-through-actions #{:save :descend :ascend}}]
+                     (game-loop screen world base-ctx explored))
                    (finally
                      (s/stop screen)))]
       (case result

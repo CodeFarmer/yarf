@@ -1569,3 +1569,183 @@
       (is (= 5 (first (entity-pos (get-player (:map result))))))
       (is (nil? (:action result))))))
 
+;; Stair tile tests
+
+(deftest stair-tile-types-test
+  (testing "predefined stair tile types have correct type"
+    (is (= :stairs-down (:type stairs-down-tile)))
+    (is (= :stairs-up (:type stairs-up-tile))))
+  (let [reg (register-default-tile-types (create-type-registry))]
+    (testing "stair tiles have correct display properties"
+      (is (= \> (tile-char reg stairs-down-tile)))
+      (is (= \< (tile-char reg stairs-up-tile)))
+      (is (= :white (tile-color reg stairs-down-tile)))
+      (is (= :white (tile-color reg stairs-up-tile))))
+    (testing "stair tiles are walkable"
+      (let [e (create-entity :player \@ :white 5 5)]
+        (is (walkable? reg e stairs-down-tile))
+        (is (walkable? reg e stairs-up-tile))))
+    (testing "stair tiles are transparent"
+      (is (transparent? reg stairs-down-tile))
+      (is (transparent? reg stairs-up-tile)))))
+
+;; World structure tests
+
+(deftest create-world-test
+  (testing "creates world with maps and current-map-id"
+    (let [m1 (create-tile-map 10 10)
+          m2 (create-tile-map 15 15)
+          world (create-world {:level-1 m1 :level-2 m2} :level-1)]
+      (is (= :level-1 (current-map-id world)))
+      (is (= m1 (current-map world)))
+      (is (= m2 (get-world-map world :level-2)))
+      (is (empty? (:transitions world))))))
+
+(deftest set-current-map-test
+  (testing "replaces the current map"
+    (let [m1 (create-tile-map 10 10)
+          m2 (create-tile-map 15 15)
+          world (create-world {:level-1 m1 :level-2 m2} :level-1)
+          new-map (add-entity m1 (create-player 3 3))
+          world2 (set-current-map world new-map)]
+      (is (= new-map (current-map world2)))
+      ;; Other map unchanged
+      (is (= m2 (get-world-map world2 :level-2))))))
+
+(deftest get-world-map-test
+  (testing "returns nil for unknown map id"
+    (let [world (create-world {:level-1 (create-tile-map 5 5)} :level-1)]
+      (is (nil? (get-world-map world :nonexistent))))))
+
+;; Transition tests
+
+(deftest add-transition-test
+  (testing "adds a one-way transition"
+    (let [world (-> (create-world {:a (create-tile-map 10 10)
+                                   :b (create-tile-map 10 10)} :a)
+                    (add-transition :a 5 5 :b [2 3]))]
+      (is (= {:target-map :b :target-pos [2 3]}
+             (get-transition world :a 5 5)))
+      (is (nil? (get-transition world :b 2 3))))))
+
+(deftest add-transition-pair-test
+  (testing "adds bidirectional transitions"
+    (let [world (-> (create-world {:a (create-tile-map 10 10)
+                                   :b (create-tile-map 10 10)} :a)
+                    (add-transition-pair :a [5 5] :b [2 3]))]
+      (is (= {:target-map :b :target-pos [2 3]}
+             (get-transition world :a 5 5)))
+      (is (= {:target-map :a :target-pos [5 5]}
+             (get-transition world :b 2 3))))))
+
+(deftest transition-at-entity-test
+  (testing "looks up transition at entity's position on current map"
+    (let [player (create-entity :player \@ :yellow 5 5)
+          world (-> (create-world {:a (-> (create-tile-map 10 10)
+                                          (add-entity player))
+                                   :b (create-tile-map 10 10)} :a)
+                    (add-transition :a 5 5 :b [2 3]))]
+      (is (= {:target-map :b :target-pos [2 3]}
+             (transition-at-entity world player)))))
+  (testing "returns nil when no transition at entity's position"
+    (let [player (create-entity :player \@ :yellow 3 3)
+          world (-> (create-world {:a (-> (create-tile-map 10 10)
+                                          (add-entity player))
+                                   :b (create-tile-map 10 10)} :a)
+                    (add-transition :a 5 5 :b [2 3]))]
+      (is (nil? (transition-at-entity world player))))))
+
+(deftest apply-transition-test
+  (testing "moves entity to target map and switches current-map-id"
+    (let [player (create-entity :player \@ :yellow 5 5)
+          m-a (-> (create-tile-map 10 10)
+                  (add-entity player))
+          m-b (create-tile-map 10 10)
+          world (-> (create-world {:a m-a :b m-b} :a)
+                    (add-transition-pair :a [5 5] :b [2 3]))
+          transition (transition-at-entity world player)
+          world2 (apply-transition world player transition)]
+      ;; Current map switched to :b
+      (is (= :b (current-map-id world2)))
+      ;; Player is on map :b at target position
+      (let [new-player (get-player (current-map world2))]
+        (is (some? new-player))
+        (is (= [2 3] (entity-pos new-player))))
+      ;; Player removed from map :a
+      (is (nil? (get-player (get-world-map world2 :a))))))
+  (testing "preserves other entities on both maps"
+    (let [player (create-entity :player \@ :yellow 5 5)
+          goblin-a (create-entity :goblin \g :green 3 3)
+          goblin-b (create-entity :goblin \g :green 7 7)
+          m-a (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity goblin-a))
+          m-b (-> (create-tile-map 10 10)
+                  (add-entity goblin-b))
+          world (-> (create-world {:a m-a :b m-b} :a)
+                    (add-transition :a 5 5 :b [2 3]))
+          transition (get-transition world :a 5 5)
+          world2 (apply-transition world player transition)]
+      ;; Goblin still on map :a
+      (is (= 1 (count (get-entities (get-world-map world2 :a)))))
+      ;; Map :b has player + goblin
+      (is (= 2 (count (get-entities (get-world-map world2 :b))))))))
+
+;; World save/load v2 tests
+
+(deftest prepare-world-save-data-test
+  (testing "creates version 2 save data"
+    (let [world (create-world {:level-1 (create-tile-map 5 5)} :level-1)
+          save-data (prepare-world-save-data world {:explored {:level-1 #{[1 1]}}})]
+      (is (= 2 (:version save-data)))
+      (is (= world (:world save-data)))
+      (is (= {:level-1 #{[1 1]}} (:explored save-data))))))
+
+(deftest restore-save-data-v2-test
+  (testing "accepts version 2"
+    (let [world (create-world {:level-1 (create-tile-map 5 5)} :level-1)
+          save-data {:version 2 :world world :explored {:level-1 #{[1 1]}}}
+          restored (restore-save-data save-data)]
+      (is (= 2 (:version restored)))
+      (is (= world (:world restored)))))
+  (testing "still accepts version 1"
+    (let [save-data {:version 1 :game-map (create-tile-map 5 5)}]
+      (is (= 1 (:version (restore-save-data save-data))))))
+  (testing "still rejects unsupported versions"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
+          (restore-save-data {:version 99})))))
+
+(deftest save-load-world-test
+  (testing "world save and load round-trip via gzip file"
+    (let [player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 7 7)
+          m1 (-> (create-tile-map 15 15)
+                 (set-tile 5 5 stairs-down-tile)
+                 (add-entity player))
+          m2 (-> (create-tile-map 15 15)
+                 (set-tile 2 3 stairs-up-tile)
+                 (add-entity goblin))
+          world (-> (create-world {:level-1 m1 :level-2 m2} :level-1)
+                    (add-transition-pair :level-1 [5 5] :level-2 [2 3]))
+          explored {:level-1 #{[5 5] [6 6]} :level-2 #{}}
+          tmp-file (str (.getAbsolutePath (java.io.File/createTempFile "yarf-world-test" ".sav")))]
+      (try
+        (save-world tmp-file world {:explored explored})
+        (let [restored (load-game tmp-file)]
+          (is (= 2 (:version restored)))
+          (is (= :level-1 (current-map-id (:world restored))))
+          ;; Player on level-1
+          (is (some? (get-player (current-map (:world restored)))))
+          ;; Goblin on level-2
+          (let [l2 (get-world-map (:world restored) :level-2)]
+            (is (= 1 (count (get-entities l2)))))
+          ;; Transitions preserved
+          (is (some? (get-transition (:world restored) :level-1 5 5)))
+          ;; Explored preserved
+          (is (= explored (:explored restored)))
+          ;; Stair tiles preserved
+          (is (= :stairs-down (:type (get-tile (current-map (:world restored)) 5 5))))
+          (is (= :stairs-up (:type (get-tile (get-world-map (:world restored) :level-2) 2 3)))))
+        (finally
+          (.delete (java.io.File. tmp-file)))))))
+
