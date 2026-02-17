@@ -147,7 +147,7 @@
   []
   (let [[sx sy] stairs-down-pos]
     (-> (core/generate-test-map 60 40)
-        (core/set-tile sx sy core/stairs-down-tile)
+        (core/set-tile sx sy {:type :stairs-down})
         (core/add-entity (create-demo-player 5 5))
         (core/add-entity (create-wandering-goblin 18 6)))))
 
@@ -156,7 +156,7 @@
   []
   (let [[sx sy] stairs-up-pos]
     (-> (core/generate-test-map 60 40)
-        (core/set-tile sx sy core/stairs-up-tile)
+        (core/set-tile sx sy {:type :stairs-up})
         (core/add-entity (create-wandering-goblin 8 20)))))
 
 (defn create-demo-world

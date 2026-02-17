@@ -93,14 +93,6 @@
   ([tile-type] {:type tile-type})
   ([tile-type properties] (merge {:type tile-type} properties)))
 
-(def floor-tile {:type :floor})
-(def wall-tile {:type :wall})
-(def door-closed-tile {:type :door-closed})
-(def door-open-tile {:type :door-open})
-(def water-tile {:type :water})
-(def stairs-down-tile {:type :stairs-down})
-(def stairs-up-tile {:type :stairs-up})
-
 (def default-tile-types
   "Default tile type definitions with display and behavior properties."
   {:floor {:char \. :color :white :walkable true :transparent true}
@@ -156,14 +148,12 @@
     (:blocks-movement entity)
     (or (get-type-property registry :entity (:type entity) :blocks-movement) false)))
 
-(def default-tile floor-tile)
-
 (defn create-tile-map
   "Creates a tile map with the given width and height, filled with default tiles."
   [width height]
   {:width width
    :height height
-   :tiles (vec (repeat (* width height) default-tile))
+   :tiles (vec (repeat (* width height) {:type :floor}))
    :entities []})
 
 (defn map-width
@@ -217,8 +207,8 @@
    x, y are top-left corner; w, h are outer dimensions."
   [tile-map x y w h]
   (-> tile-map
-      (fill-rect x y w h wall-tile)
-      (fill-rect (inc x) (inc y) (- w 2) (- h 2) floor-tile)))
+      (fill-rect x y w h {:type :wall})
+      (fill-rect (inc x) (inc y) (- w 2) (- h 2) {:type :floor})))
 
 (defn make-corridor
   "Creates an L-shaped corridor from (x1,y1) to (x2,y2).
@@ -230,15 +220,15 @@
         max-y (max y1 y2)]
     (-> tile-map
         ;; horizontal segment at y1
-        (fill-rect min-x y1 (inc (- max-x min-x)) 1 floor-tile)
+        (fill-rect min-x y1 (inc (- max-x min-x)) 1 {:type :floor})
         ;; vertical segment at x2
-        (fill-rect x2 min-y 1 (inc (- max-y min-y)) floor-tile))))
+        (fill-rect x2 min-y 1 (inc (- max-y min-y)) {:type :floor}))))
 
 (defn generate-test-map
   "Generates a simple test map with a few rooms connected by corridors."
   [width height]
   (-> (create-tile-map width height)
-      (fill-rect 0 0 width height wall-tile)
+      (fill-rect 0 0 width height {:type :wall})
       (make-room 2 2 8 6)
       (make-room 15 3 10 8)
       (make-room 5 15 12 10)

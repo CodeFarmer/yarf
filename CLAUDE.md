@@ -66,10 +66,10 @@ Maps use a flat vector for tile storage with coordinate-to-index conversion.
 Tile instances on the map are minimal (just `{:type :floor}`). Display and behavior properties (`:char`, `:color`, `:walkable`, `:transparent`) live in the type registry and are looked up at runtime. Individual tiles can override via instance properties.
 
 - `make-tile [tile-type]` or `[tile-type properties]` - create tile (properties are instance overrides)
-- Predefined: `floor-tile`, `wall-tile`, `door-closed-tile`, `door-open-tile`, `water-tile`, `stairs-down-tile`, `stairs-up-tile` — all minimal `{:type <key>}` maps
+- Tile instances are just `{:type :floor}`, `{:type :wall}`, etc. — no predefined vars, use map literals directly
 - `default-tile-types` - map of default tile type definitions with display/behavior properties
 - `register-default-tile-types [registry]` - registers `:floor`, `:wall`, `:door-closed`, `:door-open`, `:water`, `:stairs-down`, `:stairs-up` types
-- Stair tiles: `stairs-down-tile` (`>`, white, walkable, transparent), `stairs-up-tile` (`<`, white, walkable, transparent)
+- Stair tiles: `{:type :stairs-down}` (`>`, white, walkable, transparent), `{:type :stairs-up}` (`<`, white, walkable, transparent)
 - `tile-char [registry tile]` / `tile-color [registry tile]` - display accessors (instance, then type registry)
 - `walkable? [registry mover tile]` - checks if mover can traverse tile (instance, then registry, then abilities)
 - `transparent? [registry tile]` - opacity accessor (instance, then type registry)

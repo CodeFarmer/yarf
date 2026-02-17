@@ -30,7 +30,7 @@
   (testing "mock display tracks rendered content"
     (let [reg (core/register-default-tile-types (core/create-type-registry))
           d (make-mock-display)]
-      (render-tile d 5 5 core/wall-tile reg)
+      (render-tile d 5 5 {:type :wall} reg)
       (is (= 1 (count @(:rendered-atom d))))
       (is (= \# (:char (first @(:rendered-atom d))))))))
 

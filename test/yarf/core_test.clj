@@ -35,22 +35,14 @@
       (is (not (in-bounds? m 10 0)))
       (is (not (in-bounds? m 0 10))))))
 
-(deftest tile-types-test
-  (testing "predefined tile types have correct properties"
-    (is (= :floor (:type floor-tile)))
-    (is (= :wall (:type wall-tile)))
-    (is (= :door-closed (:type door-closed-tile)))
-    (is (= :door-open (:type door-open-tile)))
-    (is (= :water (:type water-tile)))))
-
 (deftest tile-char-test
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "predefined tiles have display characters via registry"
-      (is (= \. (tile-char reg floor-tile)))
-      (is (= \# (tile-char reg wall-tile)))
-      (is (= \+ (tile-char reg door-closed-tile)))
-      (is (= \/ (tile-char reg door-open-tile)))
-      (is (= \~ (tile-char reg water-tile))))
+      (is (= \. (tile-char reg {:type :floor})))
+      (is (= \# (tile-char reg {:type :wall})))
+      (is (= \+ (tile-char reg {:type :door-closed})))
+      (is (= \/ (tile-char reg {:type :door-open})))
+      (is (= \~ (tile-char reg {:type :water}))))
     (testing "instance char overrides registry"
       (let [t (make-tile :floor {:char \*})]
         (is (= \* (tile-char reg t)))))
@@ -60,11 +52,11 @@
 (deftest tile-color-test
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "predefined tiles have display colors via registry"
-      (is (= :white (tile-color reg floor-tile)))
-      (is (= :white (tile-color reg wall-tile)))
-      (is (= :yellow (tile-color reg door-closed-tile)))
-      (is (= :yellow (tile-color reg door-open-tile)))
-      (is (= :blue (tile-color reg water-tile))))
+      (is (= :white (tile-color reg {:type :floor})))
+      (is (= :white (tile-color reg {:type :wall})))
+      (is (= :yellow (tile-color reg {:type :door-closed})))
+      (is (= :yellow (tile-color reg {:type :door-open})))
+      (is (= :blue (tile-color reg {:type :water}))))
     (testing "instance color overrides registry"
       (let [t (make-tile :floor {:color :red})]
         (is (= :red (tile-color reg t)))))
@@ -75,28 +67,28 @@
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "walkable? returns correct values for tile types"
       (let [e (create-entity :player \@ :white 5 5)]
-        (is (walkable? reg e floor-tile))
-        (is (not (walkable? reg e wall-tile)))
-        (is (not (walkable? reg e door-closed-tile)))
-        (is (walkable? reg e door-open-tile))
-        (is (not (walkable? reg e water-tile)))))
+        (is (walkable? reg e {:type :floor}))
+        (is (not (walkable? reg e {:type :wall})))
+        (is (not (walkable? reg e {:type :door-closed})))
+        (is (walkable? reg e {:type :door-open}))
+        (is (not (walkable? reg e {:type :water})))))
     (testing "entities with :can-swim can walk on water"
       (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})
             player (create-entity :player \@ :white 5 5)]
-        (is (walkable? reg fish water-tile))
-        (is (not (walkable? reg player water-tile)))))
+        (is (walkable? reg fish {:type :water}))
+        (is (not (walkable? reg player {:type :water})))))
     (testing "special abilities don't override unwalkable solid tiles"
       (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})]
-        (is (not (walkable? reg fish wall-tile)))))))
+        (is (not (walkable? reg fish {:type :wall})))))))
 
 (deftest tile-transparent-test
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "transparent? returns correct values for tile types"
-      (is (transparent? reg floor-tile))
-      (is (not (transparent? reg wall-tile)))
-      (is (not (transparent? reg door-closed-tile)))
-      (is (transparent? reg door-open-tile))
-      (is (transparent? reg water-tile)))))
+      (is (transparent? reg {:type :floor}))
+      (is (not (transparent? reg {:type :wall})))
+      (is (not (transparent? reg {:type :door-closed})))
+      (is (transparent? reg {:type :door-open}))
+      (is (transparent? reg {:type :water})))))
 
 (deftest make-tile-test
   (let [reg (register-default-tile-types (create-type-registry))]
@@ -158,7 +150,7 @@
                        (define-tile-type :floor
                          {:description "A stone floor"
                           :lore "Worn smooth by countless footsteps."}))
-          tile floor-tile]
+          tile {:type :floor}]
       (is (= "A stone floor" (get-instance-type-property registry tile :description)))))
   (testing "can get type properties from an entity instance"
     (let [registry (-> (create-type-registry)
@@ -253,7 +245,7 @@
 (deftest fill-rect-test
   (testing "fills rectangular region with specified tile"
     (let [m (-> (create-tile-map 10 10)
-                (fill-rect 2 2 5 4 wall-tile))]
+                (fill-rect 2 2 5 4 {:type :wall}))]
       (is (= :wall (:type (get-tile m 2 2))))
       (is (= :wall (:type (get-tile m 6 5))))
       (is (= :floor (:type (get-tile m 1 1))))
@@ -262,7 +254,7 @@
 (deftest make-room-test
   (testing "creates a room with floor interior and wall border"
     (let [m (-> (create-tile-map 20 20)
-                (fill-rect 0 0 20 20 wall-tile)
+                (fill-rect 0 0 20 20 {:type :wall})
                 (make-room 5 5 6 4))]
       ;; walls on border
       (is (= :wall (:type (get-tile m 5 5))))
@@ -274,7 +266,7 @@
 (deftest make-corridor-test
   (testing "creates horizontal then vertical corridor between points"
     (let [m (-> (create-tile-map 20 20)
-                (fill-rect 0 0 20 20 wall-tile)
+                (fill-rect 0 0 20 20 {:type :wall})
                 (make-corridor 2 2 8 6))]
       ;; horizontal segment
       (is (= :floor (:type (get-tile m 2 2))))
@@ -361,7 +353,7 @@
     (testing "entities cannot move into wall tiles"
       (let [e (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 wall-tile)
+                  (set-tile 5 4 {:type :wall})
                   (add-entity e))
             m2 (:map (execute-action reg :move-up e m))]
         (is (= 5 (first (entity-pos (first (get-entities m2))))))
@@ -376,7 +368,7 @@
     (testing "entities cannot move diagonally into walls"
       (let [e (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 4 4 wall-tile)
+                  (set-tile 4 4 {:type :wall})
                   (add-entity e))
             m2 (:map (execute-action reg :move-up-left e m))]
         (is (= 5 (first (entity-pos (first (get-entities m2))))))
@@ -384,35 +376,35 @@
     (testing "entities can move into open doors"
       (let [e (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 door-open-tile)
+                  (set-tile 5 4 {:type :door-open})
                   (add-entity e))
             m2 (:map (execute-action reg :move-up e m))]
         (is (= 4 (second (entity-pos (first (get-entities m2))))))))
     (testing "entities cannot move into closed doors"
       (let [e (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 door-closed-tile)
+                  (set-tile 5 4 {:type :door-closed})
                   (add-entity e))
             m2 (:map (execute-action reg :move-up e m))]
         (is (= 5 (second (entity-pos (first (get-entities m2))))))))
     (testing "entities with :can-swim can move into water"
       (let [fish (create-entity :fish \f :blue 5 5 {:can-swim true})
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 water-tile)
+                  (set-tile 5 4 {:type :water})
                   (add-entity fish))
             result (try-move reg m fish 0 -1)]
         (is (= 4 (second (entity-pos (first (get-entities (:map result)))))))))
     (testing "entities without :can-swim cannot move into water"
       (let [player (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 water-tile)
+                  (set-tile 5 4 {:type :water})
                   (add-entity player))
             result (try-move reg m player 0 -1)]
         (is (= 5 (second (entity-pos (first (get-entities (:map result)))))))))
     (testing "failed moves set :no-time and :retry flags"
       (let [player (create-entity :player \@ :white 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 wall-tile)
+                  (set-tile 5 4 {:type :wall})
                   (add-entity player))
             result (try-move reg m player 0 -1)]
         (is (:no-time result))
@@ -763,7 +755,7 @@
                        (define-entity-type :player {:act player-act}))
           p (create-entity :player \@ :yellow 5 5)
           m (-> (create-tile-map 10 10)
-                (set-tile 5 4 wall-tile)  ;; wall above player
+                (set-tile 5 4 {:type :wall})  ;; wall above player
                 (add-entity p))
           ctx {:input-fn input-fn :key-map default-key-map :registry registry}
           result (act-entity m p ctx)]
@@ -866,7 +858,7 @@
   (testing "get-name works for tiles"
     (let [registry (-> (create-type-registry)
                        (define-tile-type :floor {:name "Stone Floor"}))]
-      (is (= "Stone Floor" (get-name registry floor-tile))))))
+      (is (= "Stone Floor" (get-name registry {:type :floor}))))))
 
 (deftest get-description-test
   (testing "get-description returns description from type registry"
@@ -1177,7 +1169,7 @@
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "wall blocks tiles behind it"
       (let [m (-> (create-tile-map 10 10)
-                  (set-tile 5 3 wall-tile))
+                  (set-tile 5 3 {:type :wall}))
             fov (compute-fov reg m 5 5)]
         ;; Wall itself is visible
         (is (contains? fov [5 3]))
@@ -1185,14 +1177,14 @@
         (is (not (contains? fov [5 2])))))
     (testing "wall doesn't block adjacent columns"
       (let [m (-> (create-tile-map 10 10)
-                  (set-tile 5 3 wall-tile))
+                  (set-tile 5 3 {:type :wall}))
             fov (compute-fov reg m 5 5)]
         ;; Adjacent tiles should still be visible
         (is (contains? fov [4 3]))
         (is (contains? fov [6 3]))))
     (testing "room interior is visible, outside walls is not"
       (let [m (-> (create-tile-map 20 20)
-                  (fill-rect 0 0 20 20 wall-tile)
+                  (fill-rect 0 0 20 20 {:type :wall})
                   (make-room 5 5 10 10))
             ;; Player at center of room (interior is 6,6 to 13,13)
             fov (compute-fov reg m 10 10)]
@@ -1247,19 +1239,19 @@
         (is (contains? fov [8 5]))))
     (testing "closed doors block vision"
       (let [m (-> (create-tile-map 10 10)
-                  (set-tile 5 3 door-closed-tile))
+                  (set-tile 5 3 {:type :door-closed}))
             fov (compute-fov reg m 5 5)]
         (is (contains? fov [5 3]))
         (is (not (contains? fov [5 2])))))
     (testing "open doors don't block vision"
       (let [m (-> (create-tile-map 10 10)
-                  (set-tile 5 3 door-open-tile))
+                  (set-tile 5 3 {:type :door-open}))
             fov (compute-fov reg m 5 5)]
         (is (contains? fov [5 3]))
         (is (contains? fov [5 2]))))
     (testing "water doesn't block vision"
       (let [m (-> (create-tile-map 10 10)
-                  (set-tile 5 3 water-tile))
+                  (set-tile 5 3 {:type :water}))
             fov (compute-fov reg m 5 5)]
         (is (contains? fov [5 3]))
         (is (contains? fov [5 2]))))))
@@ -1347,7 +1339,7 @@
     (let [player (create-entity :player \@ :yellow 5 5 {:view-radius 8})
           goblin (create-entity :goblin \g :green 18 6 {:delay 12 :next-action 30})
           game-map (-> (create-tile-map 20 15)
-                       (set-tile 3 3 wall-tile)
+                       (set-tile 3 3 {:type :wall})
                        (add-entity player)
                        (add-entity goblin))
           explored #{[5 5] [5 6] [6 5]}
@@ -1381,7 +1373,7 @@
     (let [player (create-entity :player \@ :yellow 5 5)
           goblin (create-entity :goblin \g :green 7 7 {:delay 12})
           game-map (-> (create-tile-map 15 15)
-                       (set-tile 2 2 wall-tile)
+                       (set-tile 2 2 {:type :wall})
                        (add-entity player)
                        (add-entity goblin))
           explored #{[5 5] [6 6]}
@@ -1439,7 +1431,7 @@
     (testing "terrain-blocked move has no :bumped-entity"
       (let [player (create-entity :player \@ :yellow 5 5)
             m (-> (create-tile-map 10 10)
-                  (set-tile 5 4 wall-tile)
+                  (set-tile 5 4 {:type :wall})
                   (add-entity player))
             result (try-move reg m player 0 -1)]
         (is (nil? (:bumped-entity result)))
@@ -1572,22 +1564,19 @@
 ;; Stair tile tests
 
 (deftest stair-tile-types-test
-  (testing "predefined stair tile types have correct type"
-    (is (= :stairs-down (:type stairs-down-tile)))
-    (is (= :stairs-up (:type stairs-up-tile))))
   (let [reg (register-default-tile-types (create-type-registry))]
     (testing "stair tiles have correct display properties"
-      (is (= \> (tile-char reg stairs-down-tile)))
-      (is (= \< (tile-char reg stairs-up-tile)))
-      (is (= :white (tile-color reg stairs-down-tile)))
-      (is (= :white (tile-color reg stairs-up-tile))))
+      (is (= \> (tile-char reg {:type :stairs-down})))
+      (is (= \< (tile-char reg {:type :stairs-up})))
+      (is (= :white (tile-color reg {:type :stairs-down})))
+      (is (= :white (tile-color reg {:type :stairs-up}))))
     (testing "stair tiles are walkable"
       (let [e (create-entity :player \@ :white 5 5)]
-        (is (walkable? reg e stairs-down-tile))
-        (is (walkable? reg e stairs-up-tile))))
+        (is (walkable? reg e {:type :stairs-down}))
+        (is (walkable? reg e {:type :stairs-up}))))
     (testing "stair tiles are transparent"
-      (is (transparent? reg stairs-down-tile))
-      (is (transparent? reg stairs-up-tile)))))
+      (is (transparent? reg {:type :stairs-down}))
+      (is (transparent? reg {:type :stairs-up})))))
 
 ;; World structure tests
 
@@ -1720,10 +1709,10 @@
     (let [player (create-entity :player \@ :yellow 5 5)
           goblin (create-entity :goblin \g :green 7 7)
           m1 (-> (create-tile-map 15 15)
-                 (set-tile 5 5 stairs-down-tile)
+                 (set-tile 5 5 {:type :stairs-down})
                  (add-entity player))
           m2 (-> (create-tile-map 15 15)
-                 (set-tile 2 3 stairs-up-tile)
+                 (set-tile 2 3 {:type :stairs-up})
                  (add-entity goblin))
           world (-> (create-world {:level-1 m1 :level-2 m2} :level-1)
                     (add-transition-pair :level-1 [5 5] :level-2 [2 3]))
