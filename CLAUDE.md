@@ -180,6 +180,33 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:action` - pass-through action keyword (returned when action is in `:pass-through-actions`)
 - `:bumped-entity` - the blocking entity at the destination (set by `try-move` when movement is blocked by an entity, not by terrain)
 
+### Dice Notation (`yarf.core`)
+
+Parse and roll dice using standard notation (e.g. `"2d6+3"`).
+
+**Notation format:**
+- `NdS` — N dice with S sides (e.g. `"2d6"`)
+- `NdS+M` / `NdS-M` — with modifier (e.g. `"3d8+2"`, `"1d6-1"`)
+- `dS` — shorthand for 1dS (e.g. `"d20"`)
+- `M` — constant (e.g. `"5"`, `"-3"`, `"+7"`)
+
+**Functions:**
+- `parse-dice [notation]` — parses string into `{:count N :sides S :modifier M}`. Throws on invalid format.
+- `roll [dice]` — returns integer total. `dice` can be a string or a parsed map.
+- `roll-detail [dice]` — returns `{:rolls [3 5] :modifier 2 :total 10}`. Same input flexibility.
+
+**Data structure:**
+```clojure
+{:count 2 :sides 6 :modifier 3}  ;; 2d6+3
+{:count 1 :sides 20 :modifier 0} ;; d20
+{:count 0 :sides 0 :modifier 5}  ;; 5 (constant)
+```
+
+**Notes:**
+- Uses `rand-int` (not seeded); seeded RNG is a separate TODO
+- Constants: `(roll "5")` always returns 5; `(roll-detail "5")` returns `{:rolls [] :modifier 5 :total 5}`
+- Zero dice: `(roll "0d6")` returns 0
+
 ### Map Generation (`yarf.core`)
 
 - `fill-rect [map x y w h tile]` - fill rectangular region
@@ -320,6 +347,7 @@ Two-level dungeon demo demonstrating the framework. Run with `lein run`.
 - Consider later: whether tiles in the map vector can be bare type keywords (e.g. `:floor` instead of `{:type :floor}`), saving even more space. Would need tiles with instance overrides to remain maps.
 - Add save file migration: when save version changes, implement migration from older versions in `restore-save-data` (v1 -> v2 is handled by demo's `load-saved-game`, but core could offer a general migration hook).
 - Support more transition types beyond stairs: portals, zone boundaries, etc. The transition structure is generic (position-to-position mapping); game loops can define their own triggering logic.
+- Seeded random number generation: deterministic RNG threaded through ctx for reproducible map generation, combat, AI, etc. (would also make dice rolls deterministic via an optional rng parameter)
 
 ## Development Notes
 

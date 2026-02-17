@@ -688,6 +688,43 @@
                     (edn/read in))]
     (restore-save-data save-data)))
 
+;; Dice notation
+
+(defn parse-dice
+  "Parses dice notation string into {:count :sides :modifier}.
+   Supports: NdS, NdS+M, NdS-M, dS (= 1dS), M (constant)."
+  [notation]
+  (cond
+    ;; Dice notation: optional count, d, sides, optional modifier
+    (re-matches #"(\d*)d(\d+)([+-]\d+)?" notation)
+    (let [[_ n s m] (re-matches #"(\d*)d(\d+)([+-]\d+)?" notation)]
+      {:count (if (empty? n) 1 (Integer/parseInt n))
+       :sides (Integer/parseInt s)
+       :modifier (if m (Integer/parseInt m) 0)})
+
+    ;; Constant: optional sign + digits
+    (re-matches #"[+-]?\d+" notation)
+    {:count 0 :sides 0 :modifier (Integer/parseInt notation)}
+
+    :else
+    (throw (ex-info (str "Invalid dice notation: " (pr-str notation))
+                    {:notation notation}))))
+
+(defn roll-detail
+  "Rolls dice and returns {:rolls [individual-rolls] :modifier M :total N}.
+   dice can be a string (parsed first) or a {:count :sides :modifier} map."
+  [dice]
+  (let [{:keys [count sides modifier]} (if (string? dice) (parse-dice dice) dice)
+        rolls (vec (repeatedly count #(inc (rand-int sides))))
+        total (+ (apply + rolls) modifier)]
+    {:rolls rolls :modifier modifier :total total}))
+
+(defn roll
+  "Rolls dice and returns the integer total.
+   dice can be a string (parsed first) or a {:count :sides :modifier} map."
+  [dice]
+  (:total (roll-detail dice)))
+
 ;; World structure (multi-map support)
 
 (defn create-world

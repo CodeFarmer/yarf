@@ -1704,6 +1704,96 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
           (restore-save-data {:version 99})))))
 
+;; Dice tests
+
+(deftest parse-dice-test
+  (testing "parses standard dice notation"
+    (is (= {:count 2 :sides 6 :modifier 0} (parse-dice "2d6")))
+    (is (= {:count 1 :sides 20 :modifier 0} (parse-dice "1d20")))
+    (is (= {:count 3 :sides 8 :modifier 0} (parse-dice "3d8"))))
+  (testing "parses dice with positive modifier"
+    (is (= {:count 2 :sides 6 :modifier 3} (parse-dice "2d6+3")))
+    (is (= {:count 1 :sides 20 :modifier 5} (parse-dice "1d20+5"))))
+  (testing "parses dice with negative modifier"
+    (is (= {:count 1 :sides 6 :modifier -1} (parse-dice "1d6-1")))
+    (is (= {:count 2 :sides 10 :modifier -3} (parse-dice "2d10-3"))))
+  (testing "parses shorthand dS as 1dS"
+    (is (= {:count 1 :sides 20 :modifier 0} (parse-dice "d20")))
+    (is (= {:count 1 :sides 6 :modifier 0} (parse-dice "d6")))
+    (is (= {:count 1 :sides 8 :modifier 2} (parse-dice "d8+2"))))
+  (testing "parses constant (plain number)"
+    (is (= {:count 0 :sides 0 :modifier 5} (parse-dice "5")))
+    (is (= {:count 0 :sides 0 :modifier 0} (parse-dice "0")))
+    (is (= {:count 0 :sides 0 :modifier 42} (parse-dice "42"))))
+  (testing "parses negative constant"
+    (is (= {:count 0 :sides 0 :modifier -3} (parse-dice "-3"))))
+  (testing "parses positive constant with explicit sign"
+    (is (= {:count 0 :sides 0 :modifier 7} (parse-dice "+7"))))
+  (testing "parses zero dice"
+    (is (= {:count 0 :sides 6 :modifier 0} (parse-dice "0d6"))))
+  (testing "parses 1d1"
+    (is (= {:count 1 :sides 1 :modifier 0} (parse-dice "1d1"))))
+  (testing "throws on invalid notation"
+    (is (thrown? Exception (parse-dice "")))
+    (is (thrown? Exception (parse-dice "abc")))
+    (is (thrown? Exception (parse-dice "d")))
+    (is (thrown? Exception (parse-dice "2d")))
+    (is (thrown? Exception (parse-dice "2d6+")))))
+
+(deftest roll-test
+  (testing "roll returns integer within expected range"
+    ;; 2d6: min 2, max 12
+    (let [results (repeatedly 100 #(roll "2d6"))]
+      (is (every? integer? results))
+      (is (every? #(<= 2 % 12) results))))
+  (testing "roll with modifier shifts range"
+    ;; 1d6+3: min 4, max 9
+    (let [results (repeatedly 100 #(roll "1d6+3"))]
+      (is (every? #(<= 4 % 9) results))))
+  (testing "roll with negative modifier"
+    ;; 1d6-1: min 0, max 5
+    (let [results (repeatedly 100 #(roll "1d6-1"))]
+      (is (every? #(<= 0 % 5) results))))
+  (testing "roll constant always returns that value"
+    (is (= 5 (roll "5")))
+    (is (= 0 (roll "0")))
+    (is (= -3 (roll "-3"))))
+  (testing "roll accepts a map"
+    (let [results (repeatedly 100 #(roll {:count 1 :sides 6 :modifier 0}))]
+      (is (every? #(<= 1 % 6) results))))
+  (testing "roll 1d1 always returns 1"
+    (is (= 1 (roll "1d1"))))
+  (testing "roll 0d6 returns 0"
+    (is (= 0 (roll "0d6")))))
+
+(deftest roll-detail-test
+  (testing "returns rolls, modifier, and total"
+    (let [result (roll-detail "2d6+3")]
+      (is (= 2 (count (:rolls result))))
+      (is (every? #(<= 1 % 6) (:rolls result)))
+      (is (= 3 (:modifier result)))
+      (is (= (+ (apply + (:rolls result)) 3) (:total result)))))
+  (testing "rolls count matches dice count"
+    (let [result (roll-detail "4d8")]
+      (is (= 4 (count (:rolls result))))
+      (is (every? #(<= 1 % 8) (:rolls result)))))
+  (testing "constant returns empty rolls"
+    (let [result (roll-detail "5")]
+      (is (= [] (:rolls result)))
+      (is (= 5 (:modifier result)))
+      (is (= 5 (:total result)))))
+  (testing "accepts a map"
+    (let [result (roll-detail {:count 1 :sides 20 :modifier 0})]
+      (is (= 1 (count (:rolls result))))
+      (is (<= 1 (first (:rolls result)) 20))
+      (is (= 0 (:modifier result)))
+      (is (= (first (:rolls result)) (:total result)))))
+  (testing "zero dice returns empty rolls with modifier"
+    (let [result (roll-detail "0d6")]
+      (is (= [] (:rolls result)))
+      (is (= 0 (:modifier result)))
+      (is (= 0 (:total result))))))
+
 (deftest save-load-world-test
   (testing "world save and load round-trip via gzip file"
     (let [player (create-entity :player \@ :yellow 5 5)
