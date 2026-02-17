@@ -81,3 +81,56 @@
     (let [d (make-mock-display)]
       (display-message d "Hello, world!")
       (is (= "Hello, world!" @(:message-atom d))))))
+
+;; Effect playback tests
+
+(deftest play-effect-test
+  (testing "empty effect doesn't crash"
+    (let [calls (atom [])
+          mock-screen (reify Object)
+          effect (core/make-effect [])
+          vp (create-viewport 20 10)]
+      ;; play-effect with empty frames should be a no-op
+      (play-effect mock-screen effect vp)))
+  (testing "single-frame effect renders cells via render-char"
+    (let [render-calls (atom [])
+          refresh-calls (atom 0)
+          mock-screen (reify Object)
+          ;; Monkey-patch by using with-redefs
+          cell (core/make-effect-cell [5 3] \* :red)
+          frame (core/make-effect-frame [cell])
+          effect (core/make-effect [frame])
+          vp (-> (create-viewport 20 10)
+                 (assoc :offset-x 0 :offset-y 0))]
+      (with-redefs [render-char (fn [scr x y ch color]
+                                  (swap! render-calls conj {:x x :y y :char ch :color color}))
+                    refresh (fn [scr] (swap! refresh-calls inc))]
+        (play-effect mock-screen effect vp {:frame-ms 0}))
+      (is (= 1 (count @render-calls)))
+      (is (= {:x 5 :y 3 :char \* :color :red} (first @render-calls)))
+      (is (= 1 @refresh-calls))))
+  (testing "cells outside viewport are skipped"
+    (let [render-calls (atom [])
+          mock-screen (reify Object)
+          cell (core/make-effect-cell [25 15] \* :red)
+          frame (core/make-effect-frame [cell])
+          effect (core/make-effect [frame])
+          vp (create-viewport 20 10)]
+      (with-redefs [render-char (fn [scr x y ch color]
+                                  (swap! render-calls conj {:x x :y y}))
+                    refresh (fn [scr] nil)]
+        (play-effect mock-screen effect vp {:frame-ms 0}))
+      (is (empty? @render-calls))))
+  (testing "render-base-fn is called each frame"
+    (let [base-calls (atom 0)
+          mock-screen (reify Object)
+          f1 (core/make-effect-frame [(core/make-effect-cell [1 1] \* :red)])
+          f2 (core/make-effect-frame [(core/make-effect-cell [2 2] \* :blue)])
+          effect (core/make-effect [f1 f2])
+          vp (create-viewport 20 10)]
+      (with-redefs [render-char (fn [& _] nil)
+                    refresh (fn [_] nil)]
+        (play-effect mock-screen effect vp
+                     {:frame-ms 0
+                      :render-base-fn (fn [scr] (swap! base-calls inc))}))
+      (is (= 2 @base-calls)))))

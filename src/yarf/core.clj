@@ -497,7 +497,8 @@
                       (cond-> {:map (:map result)}
                         (or (:quit accum) (:quit result))       (assoc :quit true)
                         (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))
-                        (or (:action accum) (:action result))   (assoc :action (or (:action result) (:action accum)))))
+                        (or (:action accum) (:action result))   (assoc :action (or (:action result) (:action accum)))
+                        (or (:effect accum) (:effect result))   (assoc :effect (or (:effect result) (:effect accum)))))
                     accum)
                   accum)))
             {:map tile-map}
@@ -724,6 +725,184 @@
    dice can be a string (parsed first) or a {:count :sides :modifier} map."
   [dice]
   (:total (roll-detail dice)))
+
+;; Spatial utilities
+
+(defn chebyshev-distance
+  "Returns the Chebyshev distance between two [x y] positions.
+   Matches 8-directional movement cost."
+  [pos1 pos2]
+  (let [[x1 y1] pos1
+        [x2 y2] pos2]
+    (max (Math/abs (- x2 x1)) (Math/abs (- y2 y1)))))
+
+(defn manhattan-distance
+  "Returns the Manhattan distance between two [x y] positions."
+  [pos1 pos2]
+  (let [[x1 y1] pos1
+        [x2 y2] pos2]
+    (+ (Math/abs (- x2 x1)) (Math/abs (- y2 y1)))))
+
+(defn euclidean-distance
+  "Returns the Euclidean distance between two [x y] positions as a double."
+  [pos1 pos2]
+  (let [[x1 y1] pos1
+        [x2 y2] pos2
+        dx (- x2 x1)
+        dy (- y2 y1)]
+    (Math/sqrt (+ (* dx dx) (* dy dy)))))
+
+(defn line
+  "Returns a vector of [x y] points along a line from `from` to `to` (inclusive)
+   using Bresenham's line algorithm."
+  [from to]
+  (let [[x0 y0] from
+        [x1 y1] to
+        dx (Math/abs (- x1 x0))
+        dy (- (Math/abs (- y1 y0)))
+        sx (if (< x0 x1) 1 -1)
+        sy (if (< y0 y1) 1 -1)]
+    (loop [x x0 y y0 err (+ dx dy) pts []]
+      (let [pts (conj pts [x y])]
+        (if (and (= x x1) (= y y1))
+          pts
+          (let [e2 (* 2 err)
+                [x' err'] (if (>= e2 dy)
+                            [(+ x sx) (+ err dy)]
+                            [x err])
+                [y' err''] (if (<= e2 dx)
+                             [(+ y sy) (+ err' dx)]
+                             [y err'])]
+            (recur x' y' err'' pts)))))))
+
+(defn line-of-sight?
+  "Returns true if there is a clear line of sight between `from` and `to`.
+   Uses `line` for the path and `transparent?` for intermediate tiles.
+   Endpoints are excluded from opacity checks."
+  [registry game-map from to]
+  (let [pts (line from to)
+        intermediate (butlast (rest pts))]
+    (every? (fn [[x y]] (transparent? registry (get-tile game-map x y)))
+            intermediate)))
+
+(defn entities-in-radius
+  "Returns entities within `radius` of `pos` using the given distance function.
+   Defaults to Chebyshev distance."
+  ([game-map pos radius]
+   (entities-in-radius game-map pos radius chebyshev-distance))
+  ([game-map pos radius distance-fn]
+   (filter #(<= (distance-fn pos (entity-pos %)) radius)
+           (get-entities game-map))))
+
+(defn nearest-entity
+  "Returns the nearest entity to `pos` by Chebyshev distance, or nil if none.
+   Optional predicate filters which entities to consider."
+  ([game-map pos]
+   (nearest-entity game-map pos (constantly true)))
+  ([game-map pos pred]
+   (let [candidates (filter pred (get-entities game-map))]
+     (when (seq candidates)
+       (apply min-key #(chebyshev-distance pos (entity-pos %)) candidates)))))
+
+;; Pathfinding
+
+(defn- reconstruct-path
+  "Reconstructs path from came-from map, from goal back to start."
+  [came-from goal]
+  (loop [current goal path (list goal)]
+    (if-let [prev (came-from current)]
+      (recur prev (conj path prev))
+      (vec path))))
+
+(defn find-path
+  "Finds a path from `from` to `to` using A* with 8-directional movement.
+   Uses Chebyshev distance as heuristic, `walkable?` for terrain checks.
+   Does not check blocking entities (terrain-only).
+   Returns a vector of [x y] positions from start to goal (inclusive), or nil.
+   opts: {:max-distance N} limits search depth."
+  ([registry game-map mover from to]
+   (find-path registry game-map mover from to nil))
+  ([registry game-map mover from to opts]
+   (let [[fx fy] from
+         [tx ty] to
+         max-dist (:max-distance opts)]
+     ;; Early exit: out of bounds or unwalkable start/goal
+     (cond
+       (not (in-bounds? game-map fx fy)) nil
+       (not (in-bounds? game-map tx ty)) nil
+       (not (walkable? registry mover (get-tile game-map fx fy))) nil
+       (not (walkable? registry mover (get-tile game-map tx ty))) nil
+       (= from to) [from]
+       :else
+       (let [neighbor-deltas (vals direction-deltas)
+             cmp (fn [[f1 x1 y1] [f2 x2 y2]]
+                   (let [c (compare f1 f2)]
+                     (if (zero? c)
+                       (let [c2 (compare x1 x2)]
+                         (if (zero? c2) (compare y1 y2) c2))
+                       c)))]
+         (loop [open (sorted-set-by cmp [(chebyshev-distance from to) fx fy])
+                g-score {from 0}
+                came-from {}
+                closed #{}]
+           (if (empty? open)
+             nil
+             (let [[_ cx cy :as current-entry] (first open)
+                   current [cx cy]
+                   open (disj open current-entry)]
+               (if (= current to)
+                 (reconstruct-path came-from to)
+                 (if (closed current)
+                   (recur open g-score came-from closed)
+                   (let [closed (conj closed current)
+                         current-g (g-score current)
+                         [open' g-score' came-from']
+                         (reduce
+                          (fn [[open g-score came-from] [dx dy]]
+                            (let [nx (+ cx dx) ny (+ cy dy)
+                                  neighbor [nx ny]
+                                  tentative-g (inc current-g)]
+                              (if (or (not (in-bounds? game-map nx ny))
+                                      (not (walkable? registry mover (get-tile game-map nx ny)))
+                                      (closed neighbor)
+                                      (and max-dist (> tentative-g max-dist)))
+                                [open g-score came-from]
+                                (if (< tentative-g (get g-score neighbor Double/MAX_VALUE))
+                                  (let [f (+ tentative-g (chebyshev-distance neighbor to))
+                                        old-g (get g-score neighbor)
+                                        open (if old-g
+                                               (disj open [(+ old-g (chebyshev-distance neighbor to)) nx ny])
+                                               open)
+                                        open (conj open [f nx ny])]
+                                    [open (assoc g-score neighbor tentative-g)
+                                     (assoc came-from neighbor current)])
+                                  [open g-score came-from]))))
+                          [open g-score came-from]
+                          neighbor-deltas)]
+                     (recur open' g-score' came-from' closed))))))))))))
+
+;; Effect construction helpers
+
+(defn make-effect-cell
+  "Creates an effect cell: a single character overlay at a world position."
+  [pos ch color]
+  {:pos pos :char ch :color color})
+
+(defn make-effect-frame
+  "Creates an effect frame: a vector of cells to display simultaneously."
+  [cells]
+  (vec cells))
+
+(defn make-effect
+  "Creates an effect: frames played in sequence with optional timing.
+   frame-ms defaults to 50ms if not specified."
+  ([frames] {:frames frames})
+  ([frames frame-ms] {:frames frames :frame-ms frame-ms}))
+
+(defn concat-effects
+  "Concatenates frames from multiple effects into one sequential effect."
+  [& effects]
+  {:frames (vec (mapcat :frames effects))})
 
 ;; World structure (multi-map support)
 

@@ -1794,6 +1794,311 @@
       (is (= 0 (:modifier result)))
       (is (= 0 (:total result))))))
 
+;; Spatial utility tests
+
+(deftest chebyshev-distance-test
+  (testing "same position returns 0"
+    (is (= 0 (chebyshev-distance [5 5] [5 5]))))
+  (testing "horizontal distance"
+    (is (= 3 (chebyshev-distance [2 5] [5 5]))))
+  (testing "vertical distance"
+    (is (= 4 (chebyshev-distance [3 1] [3 5]))))
+  (testing "diagonal distance"
+    (is (= 3 (chebyshev-distance [0 0] [3 3]))))
+  (testing "mixed distance uses max"
+    (is (= 5 (chebyshev-distance [1 2] [6 4]))))
+  (testing "symmetry"
+    (is (= (chebyshev-distance [1 2] [4 7])
+           (chebyshev-distance [4 7] [1 2])))))
+
+(deftest manhattan-distance-test
+  (testing "same position returns 0"
+    (is (= 0 (manhattan-distance [5 5] [5 5]))))
+  (testing "horizontal distance"
+    (is (= 3 (manhattan-distance [2 5] [5 5]))))
+  (testing "vertical distance"
+    (is (= 4 (manhattan-distance [3 1] [3 5]))))
+  (testing "diagonal distance"
+    (is (= 6 (manhattan-distance [0 0] [3 3]))))
+  (testing "mixed distance"
+    (is (= 7 (manhattan-distance [1 2] [6 4]))))
+  (testing "symmetry"
+    (is (= (manhattan-distance [1 2] [4 7])
+           (manhattan-distance [4 7] [1 2])))))
+
+(deftest euclidean-distance-test
+  (testing "same position returns 0.0"
+    (is (= 0.0 (euclidean-distance [5 5] [5 5]))))
+  (testing "returns double"
+    (is (double? (euclidean-distance [0 0] [1 1]))))
+  (testing "horizontal distance"
+    (is (== 3.0 (euclidean-distance [2 5] [5 5]))))
+  (testing "vertical distance"
+    (is (== 4.0 (euclidean-distance [3 1] [3 5]))))
+  (testing "pythagorean triple 3-4-5"
+    (is (== 5.0 (euclidean-distance [0 0] [3 4]))))
+  (testing "symmetry"
+    (is (= (euclidean-distance [1 2] [4 7])
+           (euclidean-distance [4 7] [1 2])))))
+
+(deftest line-test
+  (testing "horizontal line"
+    (is (= [[0 0] [1 0] [2 0] [3 0]] (line [0 0] [3 0]))))
+  (testing "vertical line"
+    (is (= [[2 1] [2 2] [2 3] [2 4]] (line [2 1] [2 4]))))
+  (testing "diagonal line"
+    (is (= [[0 0] [1 1] [2 2] [3 3]] (line [0 0] [3 3]))))
+  (testing "steep line (dy > dx)"
+    (let [pts (line [0 0] [1 4])]
+      (is (= [0 0] (first pts)))
+      (is (= [1 4] (last pts)))
+      (is (= 5 (count pts)))))
+  (testing "shallow line (dx > dy)"
+    (let [pts (line [0 0] [4 1])]
+      (is (= [0 0] (first pts)))
+      (is (= [4 1] (last pts)))
+      (is (= 5 (count pts)))))
+  (testing "reversed direction"
+    (let [pts (line [3 0] [0 0])]
+      (is (= [3 0] (first pts)))
+      (is (= [0 0] (last pts)))
+      (is (= 4 (count pts)))))
+  (testing "single point"
+    (is (= [[5 5]] (line [5 5] [5 5]))))
+  (testing "adjacent points"
+    (is (= [[1 1] [2 2]] (line [1 1] [2 2]))))
+  (testing "both endpoints included"
+    (let [pts (line [0 0] [5 3])]
+      (is (= [0 0] (first pts)))
+      (is (= [5 3] (last pts))))))
+
+(deftest line-of-sight-test
+  (let [reg (register-default-tile-types (create-type-registry))
+        open-map (create-tile-map 10 10)]
+    (testing "open path has line of sight"
+      (is (line-of-sight? reg open-map [1 1] [5 1])))
+    (testing "wall blocks line of sight"
+      (let [m (set-tile open-map 3 1 {:type :wall})]
+        (is (not (line-of-sight? reg m [1 1] [5 1])))))
+    (testing "diagonal blocked by wall"
+      (let [m (set-tile open-map 2 2 {:type :wall})]
+        (is (not (line-of-sight? reg m [1 1] [3 3])))))
+    (testing "endpoints excluded - wall at start doesn't block"
+      (let [m (set-tile open-map 1 1 {:type :wall})]
+        (is (line-of-sight? reg m [1 1] [5 1]))))
+    (testing "endpoints excluded - wall at end doesn't block"
+      (let [m (set-tile open-map 5 1 {:type :wall})]
+        (is (line-of-sight? reg m [1 1] [5 1]))))
+    (testing "adjacent positions always have LOS"
+      (is (line-of-sight? reg open-map [3 3] [4 3])))
+    (testing "same position always has LOS"
+      (is (line-of-sight? reg open-map [5 5] [5 5])))
+    (testing "closed door blocks"
+      (let [m (set-tile open-map 3 1 {:type :door-closed})]
+        (is (not (line-of-sight? reg m [1 1] [5 1])))))
+    (testing "open door doesn't block"
+      (let [m (set-tile open-map 3 1 {:type :door-open})]
+        (is (line-of-sight? reg m [1 1] [5 1]))))))
+
+(deftest entities-in-radius-test
+  (let [m (-> (create-tile-map 20 20)
+              (add-entity (create-entity :goblin \g :green 5 5))
+              (add-entity (create-entity :goblin \g :green 7 5))
+              (add-entity (create-entity :goblin \g :green 5 8))
+              (add-entity (create-entity :goblin \g :green 15 15)))]
+    (testing "finds entities within Chebyshev radius"
+      ;; [5 5]=0, [7 5]=2, [5 8]=3 all within 3; [15 15]=10 outside
+      (is (= 3 (count (entities-in-radius m [5 5] 3)))))
+    (testing "excludes entities outside radius"
+      (is (= 1 (count (entities-in-radius m [5 5] 1)))))
+    (testing "zero radius returns entities at exact position"
+      ;; entity at [15 15] has distance 0
+      (let [found (entities-in-radius m [15 15] 0)]
+        (is (= 1 (count found)))
+        (is (= [15 15] (entity-pos (first found))))))
+    (testing "empty map returns empty"
+      (let [empty-m (create-tile-map 10 10)]
+        (is (empty? (entities-in-radius empty-m [5 5] 5)))))
+    (testing "custom distance function"
+      ;; Manhattan distance: [5 5]->[7 5] = 2, [5 5]->[5 8] = 3, [5 5]->[5 5] = 0
+      (let [found (entities-in-radius m [5 5] 2 manhattan-distance)]
+        (is (= 2 (count found)))))))
+
+(deftest nearest-entity-test
+  (let [m (-> (create-tile-map 20 20)
+              (add-entity (create-entity :goblin \g :green 5 5))
+              (add-entity (create-entity :goblin \g :green 8 8))
+              (add-entity (create-entity :rat \r :brown 3 3)))]
+    (testing "finds nearest entity by Chebyshev"
+      (let [e (nearest-entity m [4 4])]
+        (is (some? e))
+        ;; [3 3] and [5 5] are both distance 1, but nearest returns one of them
+        (is (#{[3 3] [5 5]} (entity-pos e)))))
+    (testing "finds nearest matching predicate"
+      (let [e (nearest-entity m [4 4] #(= :goblin (:type %)))]
+        (is (some? e))
+        (is (= :goblin (:type e)))
+        (is (= [5 5] (entity-pos e)))))
+    (testing "returns nil when no entities"
+      (let [empty-m (create-tile-map 10 10)]
+        (is (nil? (nearest-entity empty-m [5 5])))))
+    (testing "returns nil when no match for predicate"
+      (is (nil? (nearest-entity m [4 4] #(= :dragon (:type %))))))))
+
+(deftest find-path-test
+  (let [reg (register-default-tile-types (create-type-registry))
+        mover (create-entity :player \@ :white 0 0)
+        open-map (create-tile-map 10 10)]
+    (testing "straight horizontal path"
+      (let [path (find-path reg open-map mover [1 1] [5 1])]
+        (is (some? path))
+        (is (= [1 1] (first path)))
+        (is (= [5 1] (last path)))))
+    (testing "diagonal path"
+      (let [path (find-path reg open-map mover [0 0] [3 3])]
+        (is (some? path))
+        (is (= [0 0] (first path)))
+        (is (= [3 3] (last path)))
+        ;; Pure diagonal should be 4 steps
+        (is (= 4 (count path)))))
+    (testing "path around obstacle"
+      (let [m (-> open-map
+                  (set-tile 3 1 {:type :wall})
+                  (set-tile 3 2 {:type :wall})
+                  (set-tile 3 3 {:type :wall}))
+            path (find-path reg m mover [1 2] [5 2])]
+        (is (some? path))
+        (is (= [1 2] (first path)))
+        (is (= [5 2] (last path)))
+        ;; Path must not pass through wall tiles
+        (is (every? (fn [[x y]] (walkable? reg mover (get-tile m x y))) path))))
+    (testing "no path when walled in"
+      (let [m (-> open-map
+                  (set-tile 0 1 {:type :wall})
+                  (set-tile 1 0 {:type :wall})
+                  (set-tile 1 1 {:type :wall}))]
+        (is (nil? (find-path reg m mover [0 0] [5 5])))))
+    (testing "same position returns single-element path"
+      (let [path (find-path reg open-map mover [3 3] [3 3])]
+        (is (= [[3 3]] path))))
+    (testing "adjacent path"
+      (let [path (find-path reg open-map mover [3 3] [4 3])]
+        (is (= [[3 3] [4 3]] path))))
+    (testing "respects walkability - water blocks normal mover"
+      (let [m (-> open-map
+                  (set-tile 3 0 {:type :water})
+                  (set-tile 3 1 {:type :water})
+                  (set-tile 3 2 {:type :water})
+                  (set-tile 3 3 {:type :water})
+                  (set-tile 3 4 {:type :water})
+                  (set-tile 3 5 {:type :water})
+                  (set-tile 3 6 {:type :water})
+                  (set-tile 3 7 {:type :water})
+                  (set-tile 3 8 {:type :water})
+                  (set-tile 3 9 {:type :water}))
+            ;; Water column blocks entire path
+            path (find-path reg m mover [1 5] [5 5])]
+        (is (nil? path))))
+    (testing "can-swim entity traverses water"
+      (let [m (-> open-map
+                  (set-tile 3 1 {:type :water}))
+            fish (create-entity :fish \f :blue 0 0 {:can-swim true})
+            path (find-path reg m fish [1 1] [5 1])]
+        (is (some? path))
+        (is (= [1 1] (first path)))
+        (is (= [5 1] (last path)))))
+    (testing "ignores blocking entities"
+      (let [blocker (create-entity :goblin \g :green 3 1)
+            reg2 (define-entity-type reg :goblin {:blocks-movement true})
+            m (add-entity open-map blocker)
+            path (find-path reg2 m mover [1 1] [5 1])]
+        (is (some? path))
+        ;; Path may go through the blocking entity's position
+        (is (= [1 1] (first path)))
+        (is (= [5 1] (last path)))))
+    (testing "max-distance limits search"
+      ;; Path from [0 0] to [9 9] = 9 steps diagonal. max-distance 3 = nil
+      (let [path (find-path reg open-map mover [0 0] [9 9] {:max-distance 3})]
+        (is (nil? path))))
+    (testing "max-distance allows shorter paths"
+      (let [path (find-path reg open-map mover [0 0] [2 2] {:max-distance 5})]
+        (is (some? path))
+        (is (= [0 0] (first path)))
+        (is (= [2 2] (last path)))))
+    (testing "every step in path is walkable and in-bounds"
+      (let [m (-> (create-tile-map 15 15)
+                  (fill-rect 0 0 15 15 {:type :wall})
+                  (fill-rect 1 1 13 13 {:type :floor}))
+            path (find-path reg m mover [1 1] [13 13])]
+        (is (some? path))
+        (is (every? (fn [[x y]] (and (in-bounds? m x y)
+                                     (walkable? reg mover (get-tile m x y))))
+                    path))))
+    (testing "returns nil when start is unwalkable"
+      (let [m (set-tile open-map 1 1 {:type :wall})]
+        (is (nil? (find-path reg m mover [1 1] [5 5])))))
+    (testing "returns nil when goal is unwalkable"
+      (let [m (set-tile open-map 5 5 {:type :wall})]
+        (is (nil? (find-path reg m mover [1 1] [5 5])))))
+    (testing "returns nil when start is out of bounds"
+      (is (nil? (find-path reg open-map mover [-1 -1] [5 5]))))
+    (testing "returns nil when goal is out of bounds"
+      (is (nil? (find-path reg open-map mover [1 1] [15 15]))))))
+
+;; Effect helpers tests
+
+(deftest make-effect-cell-test
+  (testing "creates correct map structure"
+    (let [cell (make-effect-cell [3 5] \* :red)]
+      (is (= [3 5] (:pos cell)))
+      (is (= \* (:char cell)))
+      (is (= :red (:color cell)))))
+  (testing "different values"
+    (let [cell (make-effect-cell [0 0] \# :yellow)]
+      (is (= [0 0] (:pos cell)))
+      (is (= \# (:char cell)))
+      (is (= :yellow (:color cell))))))
+
+(deftest make-effect-frame-test
+  (testing "wraps cells in a vector"
+    (let [cells [(make-effect-cell [1 1] \* :red)
+                 (make-effect-cell [2 2] \* :blue)]
+          frame (make-effect-frame cells)]
+      (is (vector? frame))
+      (is (= 2 (count frame)))
+      (is (= [1 1] (:pos (first frame))))))
+  (testing "empty frame"
+    (let [frame (make-effect-frame [])]
+      (is (vector? frame))
+      (is (empty? frame)))))
+
+(deftest make-effect-test
+  (testing "creates effect with frames"
+    (let [f1 (make-effect-frame [(make-effect-cell [1 1] \* :red)])
+          f2 (make-effect-frame [(make-effect-cell [1 1] \* :yellow)])
+          effect (make-effect [f1 f2])]
+      (is (= [f1 f2] (:frames effect)))
+      (is (not (contains? effect :frame-ms)))))
+  (testing "creates effect with custom frame-ms"
+    (let [f1 (make-effect-frame [(make-effect-cell [1 1] \* :red)])
+          effect (make-effect [f1] 80)]
+      (is (= [f1] (:frames effect)))
+      (is (= 80 (:frame-ms effect)))))
+  (testing "concat-effects combines frames from multiple effects"
+    (let [f1 (make-effect-frame [(make-effect-cell [1 1] \* :red)])
+          f2 (make-effect-frame [(make-effect-cell [2 2] \* :blue)])
+          f3 (make-effect-frame [(make-effect-cell [3 3] \* :green)])
+          e1 (make-effect [f1 f2])
+          e2 (make-effect [f3])
+          combined (concat-effects e1 e2)]
+      (is (= 3 (count (:frames combined))))
+      (is (= [f1 f2 f3] (:frames combined)))))
+  (testing "concat-effects with single effect"
+    (let [f1 (make-effect-frame [(make-effect-cell [1 1] \* :red)])
+          e1 (make-effect [f1])
+          combined (concat-effects e1)]
+      (is (= 1 (count (:frames combined)))))))
+
 (deftest save-load-world-test
   (testing "world save and load round-trip via gzip file"
     (let [player (create-entity :player \@ :yellow 5 5)

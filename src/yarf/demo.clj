@@ -122,12 +122,21 @@
      (+ offset-x (dec width))
      (+ offset-y (dec height))]))
 
+(defn demo-hit-effect
+  "Creates a two-frame hit flash effect at the given position."
+  [pos]
+  (core/make-effect
+    [(core/make-effect-frame [(core/make-effect-cell pos \* :red)])
+     (core/make-effect-frame [(core/make-effect-cell pos \* :yellow)])]))
+
 (defn demo-on-bump
-  "Bump callback: instantly slays the bumped entity."
+  "Bump callback: instantly slays the bumped entity with a hit effect."
   [entity game-map bumped-entity ctx]
-  (let [target-name (core/get-name (:registry ctx) bumped-entity)]
+  (let [target-name (core/get-name (:registry ctx) bumped-entity)
+        pos (core/entity-pos bumped-entity)]
     {:map (core/remove-entity game-map bumped-entity)
-     :message (str "You slay the " target-name "!")}))
+     :message (str "You slay the " target-name "!")
+     :effect (demo-hit-effect pos)}))
 
 (defn create-demo-player
   "Creates a player for the demo."
@@ -219,7 +228,11 @@
         (render-game screen game-map vp level-msg fov map-explored registry)
         (let [ctx (assoc base-ctx :explored map-explored)
               result (core/process-actors game-map ctx)
-              {:keys [map quit message action]} result]
+              {:keys [map quit message action effect]} result]
+          (when effect
+            (display/play-effect screen effect vp
+                                 {:render-base-fn (fn [scr]
+                                                    (render-game scr map vp nil fov map-explored registry))}))
           (cond
             quit :quit
 

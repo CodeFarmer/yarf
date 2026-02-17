@@ -174,3 +174,27 @@
                    (>= sy 0) (< sy height))
           (render-entity display sx sy entity))))))
 
+;; Effect playback
+
+(defn play-effect
+  "Plays a visual effect on screen. For each frame, optionally re-renders the base
+   scene, overlays effect cells via render-char, refreshes, and sleeps.
+   opts: {:frame-ms N, :render-base-fn (fn [screen] ...)}"
+  ([screen effect viewport] (play-effect screen effect viewport nil))
+  ([screen effect viewport opts]
+   (let [frame-ms (or (:frame-ms opts) (:frame-ms effect) 50)
+         render-base-fn (:render-base-fn opts)
+         {:keys [width height]} viewport]
+     (doseq [frame (:frames effect)]
+       (when render-base-fn
+         (render-base-fn screen))
+       (doseq [cell frame]
+         (let [[wx wy] (:pos cell)
+               [sx sy] (world-to-screen viewport wx wy)]
+           (when (and (>= sx 0) (< sx width)
+                      (>= sy 0) (< sy height))
+             (render-char screen sx sy (:char cell) (:color cell)))))
+       (refresh screen)
+       (when (pos? frame-ms)
+         (Thread/sleep frame-ms))))))
+

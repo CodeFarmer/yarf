@@ -178,6 +178,7 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:retry` - action had no effect, poll for new input (used with `:no-time`)
 - `:quit` - signals game should exit
 - `:action` - pass-through action keyword (returned when action is in `:pass-through-actions`)
+- `:effect` - an effect map to play (propagated by `process-actors`, game loop calls `play-effect`)
 - `:bumped-entity` - the blocking entity at the destination (set by `try-move` when movement is blocked by an entity, not by terrain)
 
 ### Dice Notation (`yarf.core`)
@@ -206,6 +207,72 @@ Parse and roll dice using standard notation (e.g. `"2d6+3"`).
 - Uses `rand-int` (not seeded); seeded RNG is a separate TODO
 - Constants: `(roll "5")` always returns 5; `(roll-detail "5")` returns `{:rolls [] :modifier 5 :total 5}`
 - Zero dice: `(roll "0d6")` returns 0
+
+### Spatial Utilities (`yarf.core`)
+
+Distance, line drawing, line-of-sight, entity spatial queries, and pathfinding. All position arguments are `[x y]` vectors matching `entity-pos` return type.
+
+**Distance functions:**
+- `chebyshev-distance [pos1 pos2]` — max(|dx|, |dy|). Matches 8-directional movement/FOV.
+- `manhattan-distance [pos1 pos2]` — |dx| + |dy|
+- `euclidean-distance [pos1 pos2]` — sqrt(dx²+dy²), returns double
+
+**Line drawing:**
+- `line [from to]` — Bresenham's line algorithm. Returns vector of `[x y]` points, inclusive of both endpoints. Useful for projectile paths, blast patterns, LOS checks.
+
+**Line of sight:**
+- `line-of-sight? [registry game-map from to]` — true if all intermediate tiles on the line are transparent. Endpoints excluded from checks (you can see FROM a wall and TO a wall). Same position or adjacent = always true.
+
+**Entity spatial queries:**
+- `entities-in-radius [game-map pos radius]` — entities within Chebyshev distance. No registry needed.
+- `entities-in-radius [game-map pos radius distance-fn]` — with custom distance function
+- `nearest-entity [game-map pos]` — nearest entity by Chebyshev distance, or nil
+- `nearest-entity [game-map pos pred]` — nearest entity matching predicate, or nil
+
+**Pathfinding:**
+- `find-path [registry game-map mover from to]` — A* pathfinding with 8-directional movement
+- `find-path [registry game-map mover from to opts]` — with options: `{:max-distance N}`
+
+**Pathfinding details:**
+- Heuristic: Chebyshev distance. Movement cost: 1 for all directions.
+- Uses `walkable?` for terrain — respects mover abilities (e.g. `:can-swim`)
+- Does NOT check blocking entities (terrain-only paths)
+- Returns vector of `[x y]` start-to-goal inclusive, or nil if no path
+- Both start and goal must be walkable and in-bounds; otherwise nil
+- `:max-distance` limits g-score depth (nil = no limit)
+
+### Effects (`yarf.core` + `yarf.display`)
+
+An extension point for ASCII special effects (hit flashes, explosions, projectiles). Core provides low-level data constructors; display provides the playback engine. Game authors build their own effects by composing these helpers with existing spatial utilities (`line`, `chebyshev-distance`, etc.).
+
+**Data model:**
+```clojure
+;; Cell: single character overlay at a world position
+{:pos [x y] :char \* :color :red}
+
+;; Frame: cells displayed simultaneously
+[{:pos [3 5] :char \* :color :yellow} {:pos [4 5] :char \* :color :red}]
+
+;; Effect: frames played in sequence
+{:frames [[...] [...]] :frame-ms 80}  ;; :frame-ms optional, default 50ms
+```
+
+**Core helpers (`yarf.core`):**
+- `make-effect-cell [pos ch color]` — creates `{:pos pos :char ch :color color}`
+- `make-effect-frame [cells]` — wraps cells in a vector
+- `make-effect [frames]` / `[frames frame-ms]` — creates effect map
+- `concat-effects [& effects]` — concatenates `:frames` from multiple effects
+
+**Playback (`yarf.display`):**
+- `play-effect [screen effect viewport]` / `[screen effect viewport opts]`
+- For each frame: optionally calls `render-base-fn`, overlays cells via `render-char`, refreshes, sleeps
+- `opts`: `{:frame-ms N, :render-base-fn (fn [screen] ...)}`
+- Uses existing low-level `render-char` and `refresh`; no Display protocol extension
+
+**Action-result integration:**
+- Act functions (e.g. `on-bump`) can return `:effect` in their action-result
+- `process-actors` propagates `:effect` alongside `:quit`, `:message`, `:action`
+- Game loop checks `:effect` in result and calls `play-effect`
 
 ### Map Generation (`yarf.core`)
 
@@ -320,7 +387,7 @@ Two-level dungeon demo demonstrating the framework. Run with `lein run`.
 - On startup, prompts to load if a save file exists (handles both v1 and v2 saves)
 - Two dungeon levels connected by stairs (level-1 has `>` at [22 7], level-2 has `<` at [8 18])
 - Player starts on level-1; goblins wander on each level independently
-- Bump-attack: walking into a goblin kills it instantly (via `demo-on-bump` callback on `:on-bump` in ctx)
+- Bump-attack: walking into a goblin kills it instantly with a red/yellow hit flash (via `demo-on-bump` callback on `:on-bump` in ctx, returns `:effect` in action-result)
 - Type registry with tile/entity names, descriptions, and `:act` functions (including stair tile descriptions)
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
