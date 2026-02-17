@@ -109,7 +109,7 @@ Act functions receive `(entity, game-map, ctx)` and return an **action-result** 
 - `act-entity [map entity ctx]` - looks up act fn from `(:registry ctx)`, calls it with ctx, processes timing, returns action-result
 - `process-actors [map ctx]` - processes all actors, returns action-result with accumulated flags
 - `process-next-actor [map ctx]` - processes next actor, returns action-result
-- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn`, `:on-bump`, `:on-bump-tile` from ctx
+- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn`, `:on-bump`, `:on-bump-tile`, `:on-ranged-attack` from ctx
 
 **Context (ctx):**
 A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys:
@@ -120,6 +120,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
 - `:on-bump` - `(fn [mover game-map bumped-entity ctx])` callback when player bumps a blocking entity; returns action-result. Without `:on-bump`, bumps retry like walls.
 - `:on-bump-tile` - `(fn [mover game-map [x y] ctx])` callback when player bumps a non-walkable in-bounds tile; returns action-result. If result has `:retry`, retries input. Without `:on-bump-tile`, terrain bumps retry like before. Entity bumps (`:on-bump`) take priority over tile bumps.
+- `:on-ranged-attack` - `(fn [attacker game-map [tx ty] ctx])` callback when player confirms a ranged attack target; returns action-result. Without `:on-ranged-attack`, ranged attack falls back to look-mode message. If result has `:retry`, retries input.
 - `:pass-through-actions` - set of action keywords that `player-act` returns as `{:action <keyword>}` for the game loop to handle (e.g. `#{:save}`)
 - Game-specific: `:screen`, `:viewport`, `:explored`, etc.
 
@@ -152,8 +153,9 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - Valid actions (successful moves, quit) exit the loop
 - Bumping a blocking entity: if `:on-bump` is in ctx, calls it and returns its result; otherwise retries like a wall
 - Bumping a non-walkable tile: if `:on-bump-tile` is in ctx, calls it; if its result has `:retry`, retries input; otherwise returns the result. Without `:on-bump-tile`, retries like before.
-- `:look` and `:quit` are handled in `player-act`, not in `execute-action`
-- Without `:registry` in ctx, pressing look key is treated as unknown input (retried)
+- `:look`, `:ranged-attack`, and `:quit` are handled in `player-act`, not in `execute-action`
+- `:ranged-attack` enters look-mode for targeting; on Enter calls `:on-ranged-attack` callback with target position; on Escape retries input
+- Without `:registry` in ctx, pressing look or ranged-attack key is treated as unknown input (retried)
 
 **Look mode (`yarf.core`):**
 - `look-mode [ctx game-map start-x start-y]` - self-contained cursor movement loop
@@ -163,8 +165,8 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `:on-look-move` callback: `(fn [ctx game-map cx cy look-info])` - called at initial position and each cursor move
 - `look-info` is the result of `(look-at registry game-map cx cy)`
 - `bounds`: optional `[min-x min-y max-x max-y]` to constrain cursor movement (intersected with map bounds); nil = map bounds only
-- Enter: returns `{:map game-map :no-time true :message description}` (falls back to "You see {name}.")
-- Escape: returns `{:map game-map :no-time true}` (no message)
+- Enter: returns `{:map game-map :no-time true :message description :target-pos [cx cy] :look-info info}` (falls back to "You see {name}.")
+- Escape: returns `{:map game-map :no-time true}` (no message, no `:target-pos`, no `:look-info`)
 - Cursor stays within bounds (and map bounds); unknown keys are ignored
 
 **Looking at objects (`yarf.core`):**
@@ -184,6 +186,8 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:effect` - an effect map to play (propagated by `process-actors`, game loop calls `play-effect`)
 - `:bumped-entity` - the blocking entity at the destination (set by `try-move` when movement is blocked by an entity, not by terrain)
 - `:bumped-pos` - `[x y]` of the non-walkable tile bumped (set by `try-move` for in-bounds terrain blocks; not set for out-of-bounds or entity blocks)
+- `:target-pos` - `[x y]` of the position selected in look-mode (set on Enter, absent on Escape)
+- `:look-info` - `{:name :description :category :target}` for the selected position (set on Enter, absent on Escape)
 
 ### Dice Notation (`yarf.core`)
 
@@ -293,14 +297,19 @@ Ready-to-use building blocks: named tiles, door mechanics, d20-style combat, and
 
 **Combat:**
 
-Type registry properties: `:max-hp`, `:attack` (dice string), `:defense` (number), `:damage` (dice string), `:armor` (number). Instance property: `:hp` (set at entity creation).
+Melee type properties: `:max-hp`, `:attack` (dice string), `:defense` (number), `:damage` (dice string), `:armor` (number). Instance property: `:hp` (set at entity creation).
 
-Resolution: `roll(attack) >= defense` → hit → `max(0, roll(damage) - armor)` → HP ≤ 0 → entity removed from map.
+Ranged type properties: `:ranged-attack` (dice string), `:ranged-damage` (dice string), `:range` (number, default 6).
+
+Resolution (same for melee and ranged): `roll(attack-dice) >= defense` → hit → `max(0, roll(damage-dice) - armor)` → HP ≤ 0 → entity removed from map.
 
 - `alive? [entity]` — `(:hp entity) > 0`
 - `apply-damage [game-map entity damage]` — reduces HP, removes at 0. Returns `{:map updated-map :removed true/nil}`
-- `melee-attack [attacker game-map defender ctx]` — full attack resolution. Returns action-result with `:message`. Uses `core/get-property` for instance-then-type lookup. Also returns `:hit true` on hit (stripped by `combat-on-bump`).
+- `melee-attack [attacker game-map defender ctx]` — full melee attack resolution. Returns action-result with `:message`. Uses `core/get-property` for instance-then-type lookup. Also returns `:hit true` on hit (stripped by `combat-on-bump`).
 - `combat-on-bump [mover game-map bumped ctx]` — `:on-bump` callback. Calls `melee-attack`, adds `:effect` (hit flash or miss dash).
+- `ranged-attack [attacker game-map defender ctx]` — ranged attack resolution using `:ranged-attack` and `:ranged-damage` properties. Same return pattern as `melee-attack` (`:hit true` on hit).
+- `projectile-effect [from to]` / `[from to ch color]` — multi-frame projectile along Bresenham line (default `*` cyan, 30ms). Skips start position.
+- `ranged-on-target [attacker game-map [tx ty] ctx]` — `:on-ranged-attack` callback. Checks: self-target (retry), LOS ("You can't see there."), range ("Out of range."), no entity ("Nothing to shoot at."). On valid target: resolves `ranged-attack`, composes projectile + hit/miss effect.
 - `hit-effect [pos]` — 2-frame red/yellow flash
 - `miss-effect [pos]` — 1-frame white dash
 
@@ -426,12 +435,13 @@ Two-level dungeon demo demonstrating the framework. Uses `yarf.basics` for comba
 
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
+- `f` to fire ranged attack: move cursor to target, Enter to fire, Escape to cancel
 - `>` to descend stairs, `<` to ascend stairs
 - `Shift-S` to save game (writes `yarf-save.dat` in working directory)
 - On startup, prompts to load if a save file exists (handles both v1 and v2 saves)
 - Two dungeon levels connected by stairs (level-1 has `>` at [22 7], level-2 has `<` at [8 18])
 - Player starts on level-1; goblins chase and attack the player (via `basics/make-chase-act`)
-- d20-style combat: player (20 HP, 1d20+2 attack, 12 defense, 1d6+1 damage) vs goblins (5 HP, 1d20 attack, 8 defense, 1d4 damage). Hit/miss effects on bump. Uses `basics/combat-on-bump` as `:on-bump` callback.
+- d20-style combat: player (20 HP, 1d20+2 melee attack, 12 defense, 1d6+1 melee damage, 1d20+1 ranged attack, 1d8 ranged damage, range 8) vs goblins (5 HP, 1d20 attack, 8 defense, 1d4 damage). Hit/miss effects on bump. Uses `basics/combat-on-bump` as `:on-bump` callback, `basics/ranged-on-target` as `:on-ranged-attack` callback.
 - Doors: level-1 has a closed door at [9 5]; walking into it opens it via `basics/door-on-bump-tile` as `:on-bump-tile` callback
 - Player death: game loop checks if player was killed after `process-actors`, ends game with death message
 - Type registry uses `basics/register-basic-tile-types` for named tiles with descriptions

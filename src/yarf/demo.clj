@@ -10,13 +10,14 @@
 
 (def demo-key-map
   "Key bindings for demo: vi-style movement plus quit, Shift-S to save,
-   > to descend stairs, < to ascend stairs."
+   > to descend stairs, < to ascend stairs, f to fire ranged attack."
   (merge core/default-key-map
          {\q :quit
           :escape :quit
           \S :save
           \> :descend
-          \< :ascend}))
+          \< :ascend
+          \f :ranged-attack}))
 
 (defn create-demo-registry
   "Creates a type registry for the demo with tile and entity descriptions."
@@ -26,7 +27,8 @@
       (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."
                                         :act core/player-act :blocks-movement true
                                         :max-hp 20 :attack "1d20+2" :defense 12
-                                        :damage "1d6+1" :armor 0})
+                                        :damage "1d6+1" :armor 0
+                                        :ranged-attack "1d20+1" :ranged-damage "1d8" :range 8})
       (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."
                                         :act (basics/make-chase-act basics/player-target-fn)
                                         :blocks-movement true
@@ -280,6 +282,7 @@
   (println "Starting YARF demo...")
   (println "Movement: hjkl (vi-style), yubn (diagonals)")
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
+  (println "Fire: f (select target, Enter to fire, Escape to cancel)")
   (println "Stairs: > to descend, < to ascend")
   (println "Save: Shift-S | Quit: q or ESC")
   (let [registry (create-demo-registry)
@@ -302,6 +305,7 @@
                                    :look-bounds-fn demo-look-bounds-fn
                                    :on-bump basics/combat-on-bump
                                    :on-bump-tile basics/door-on-bump-tile
+                                   :on-ranged-attack basics/ranged-on-target
                                    :pass-through-actions #{:save :descend :ascend}}]
                      (game-loop screen world base-ctx explored))
                    (finally

@@ -583,11 +583,13 @@
          (let [input (input-fn)
                action (get key-map input)]
            (cond
-             ;; Enter: return description
+             ;; Enter: return description + target info
              (= input :enter)
              {:map game-map :no-time true
               :message (or (:description look-info)
-                           (str "You see " (:name look-info) "."))}
+                           (str "You see " (:name look-info) "."))
+              :target-pos [cx cy]
+              :look-info look-info}
 
              ;; Escape: cancel
              (= input :escape)
@@ -633,6 +635,25 @@
 
           ;; Look without registry - retry
           (= action :look)
+          (recur)
+
+          ;; Ranged attack via look-mode targeting
+          (and (= action :ranged-attack) registry)
+          (let [[px py] (entity-pos entity)
+                bounds (when look-bounds-fn
+                         (look-bounds-fn ctx game-map entity))
+                result (look-mode ctx game-map px py bounds)]
+            (if-let [target-pos (:target-pos result)]
+              (if-let [on-ranged (:on-ranged-attack ctx)]
+                (let [ranged-result (on-ranged entity game-map target-pos ctx)]
+                  (if (:retry ranged-result)
+                    (recur)
+                    ranged-result))
+                result)
+              (recur)))
+
+          ;; Ranged attack without registry - retry
+          (= action :ranged-attack)
           (recur)
 
           ;; Pass-through actions (game-loop handles these)

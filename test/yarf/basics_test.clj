@@ -416,3 +416,162 @@
             ctx {:registry reg}
             result (chase-act goblin m ctx)]
         (is (some? (:map result)))))))
+
+;; Ranged attack tests
+
+(deftest projectile-effect-test
+  (testing "creates multi-frame effect along line"
+    (let [effect (basics/projectile-effect [2 2] [6 2])]
+      ;; Line from [2,2] to [6,2] has 5 points, skip first = 4 frames
+      (is (= 4 (count (:frames effect))))
+      ;; Each frame has one cell
+      (is (every? #(= 1 (count %)) (:frames effect)))
+      ;; First frame at [3,2] (not [2,2])
+      (is (= [3 2] (:pos (first (first (:frames effect))))))
+      ;; Last frame at [6,2]
+      (is (= [6 2] (:pos (first (last (:frames effect))))))))
+  (testing "custom char and color"
+    (let [effect (basics/projectile-effect [0 0] [2 0] \- :red)
+          cell (first (first (:frames effect)))]
+      (is (= \- (:char cell)))
+      (is (= :red (:color cell)))))
+  (testing "adjacent positions produce single frame"
+    (let [effect (basics/projectile-effect [5 5] [6 5])]
+      (is (= 1 (count (:frames effect)))))))
+
+(defn- make-ranged-registry []
+  (-> (core/create-type-registry)
+      (basics/register-basic-tile-types)
+      (core/define-entity-type :player {:name "Player"
+                                        :max-hp 20 :attack "1d20+2"
+                                        :defense 12 :damage "1d6+1" :armor 0
+                                        :ranged-attack "1d20+1" :ranged-damage "1d8"
+                                        :range 8
+                                        :blocks-movement true})
+      (core/define-entity-type :goblin {:name "Goblin"
+                                        :max-hp 5 :attack "1d20"
+                                        :defense 8 :damage "1d4" :armor 0
+                                        :blocks-movement true})))
+
+(deftest ranged-attack-test
+  (let [reg (make-ranged-registry)]
+    (testing "hit deals damage"
+      (with-redefs [core/roll (fn [dice]
+                                (cond
+                                  (= dice "1d20+1") 15  ;; ranged attack roll >= defense 8
+                                  (= dice "1d8") 5      ;; ranged damage
+                                  :else 0))]
+        (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+              goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+              m (-> (core/create-tile-map 10 10)
+                    (core/add-entity player)
+                    (core/add-entity goblin))
+              ctx {:registry reg}
+              result (basics/ranged-attack player m goblin ctx)]
+          (is (empty? (filter #(= :goblin (:type %)) (core/get-entities (:map result)))))
+          (is (.contains (:message result) "5"))
+          (is (:hit result)))))
+    (testing "miss returns message with no damage"
+      (with-redefs [core/roll (fn [dice]
+                                (cond
+                                  (= dice "1d20+1") 5  ;; miss (< defense 8)
+                                  :else 0))]
+        (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+              goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+              m (-> (core/create-tile-map 10 10)
+                    (core/add-entity player)
+                    (core/add-entity goblin))
+              ctx {:registry reg}
+              result (basics/ranged-attack player m goblin ctx)]
+          (is (= 5 (:hp (first (filter #(= :goblin (:type %)) (core/get-entities (:map result)))))))
+          (is (nil? (:hit result))))))
+    (testing "uses ranged-attack and ranged-damage properties"
+      (with-redefs [core/roll (fn [dice]
+                                (cond
+                                  (= dice "1d20+1") 15
+                                  (= dice "1d8") 3
+                                  :else 0))]
+        (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+              goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+              m (-> (core/create-tile-map 10 10)
+                    (core/add-entity player)
+                    (core/add-entity goblin))
+              ctx {:registry reg}
+              result (basics/ranged-attack player m goblin ctx)]
+          (is (= 2 (:hp (first (filter #(= :goblin (:type %)) (core/get-entities (:map result))))))))))))
+
+(deftest ranged-on-target-test
+  (let [reg (make-ranged-registry)]
+    (testing "self-target returns retry"
+      (let [player (core/create-entity :player \@ :yellow 5 5 {:hp 20})
+            m (-> (core/create-tile-map 10 10)
+                  (core/add-entity player))
+            ctx {:registry reg}
+            result (basics/ranged-on-target player m [5 5] ctx)]
+        (is (:retry result))
+        (is (:no-time result))))
+    (testing "no LOS returns message"
+      (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+            goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+            m (-> (core/create-tile-map 10 10)
+                  (core/set-tile 5 3 {:type :wall})
+                  (core/add-entity player)
+                  (core/add-entity goblin))
+            ctx {:registry reg}
+            result (basics/ranged-on-target player m [7 3] ctx)]
+        (is (= "You can't see there." (:message result)))
+        (is (:no-time result))
+        (is (nil? (:retry result)))))
+    (testing "out of range returns message"
+      (let [player (core/create-entity :player \@ :yellow 1 1 {:hp 20})
+            goblin (core/create-entity :goblin \g :green 1 15 {:hp 5})
+            m (-> (core/create-tile-map 20 20)
+                  (core/add-entity player)
+                  (core/add-entity goblin))
+            ctx {:registry reg}
+            ;; Distance is 14, range is 8
+            result (basics/ranged-on-target player m [1 15] ctx)]
+        (is (= "Out of range." (:message result)))
+        (is (:no-time result))))
+    (testing "no entity at target returns message"
+      (let [player (core/create-entity :player \@ :yellow 5 5 {:hp 20})
+            m (-> (core/create-tile-map 10 10)
+                  (core/add-entity player))
+            ctx {:registry reg}
+            result (basics/ranged-on-target player m [7 5] ctx)]
+        (is (= "Nothing to shoot at." (:message result)))
+        (is (:no-time result))))
+    (testing "successful hit with projectile and hit effect"
+      (with-redefs [core/roll (fn [dice]
+                                (cond
+                                  (= dice "1d20+1") 15
+                                  (= dice "1d8") 5
+                                  :else 0))]
+        (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+              goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+              m (-> (core/create-tile-map 10 10)
+                    (core/add-entity player)
+                    (core/add-entity goblin))
+              ctx {:registry reg}
+              result (basics/ranged-on-target player m [7 3] ctx)]
+          (is (some? (:effect result)))
+          (is (some? (:message result)))
+          ;; Should not leak :hit flag
+          (is (nil? (:hit result)))
+          ;; Projectile frames (4) + hit frames (2) = 6
+          (is (= 6 (count (:frames (:effect result))))))))
+    (testing "miss with projectile and miss effect"
+      (with-redefs [core/roll (fn [dice]
+                                (cond
+                                  (= dice "1d20+1") 3  ;; miss
+                                  :else 0))]
+        (let [player (core/create-entity :player \@ :yellow 3 3 {:hp 20})
+              goblin (core/create-entity :goblin \g :green 7 3 {:hp 5})
+              m (-> (core/create-tile-map 10 10)
+                    (core/add-entity player)
+                    (core/add-entity goblin))
+              ctx {:registry reg}
+              result (basics/ranged-on-target player m [7 3] ctx)]
+          (is (some? (:effect result)))
+          ;; Projectile frames (4) + miss frames (1) = 5
+          (is (= 5 (count (:frames (:effect result))))))))))

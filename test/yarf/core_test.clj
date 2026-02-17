@@ -1083,7 +1083,47 @@
                :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
                :key-map default-key-map}
           result (look-mode ctx m 5 5)]
-      (is (= "A small goblin." (:message result))))))
+      (is (= "A small goblin." (:message result)))))
+
+  (testing "Enter returns :target-pos and :look-info"
+    (let [registry (-> (create-type-registry)
+                       (define-tile-type :floor {:name "Stone Floor" :description "Cold grey stone."}))
+          m (create-tile-map 10 10)
+          inputs (atom [\l \j :enter])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
+      (is (= [6 6] (:target-pos result)))
+      (is (= "Stone Floor" (:name (:look-info result))))
+      (is (= :tile (:category (:look-info result))))))
+
+  (testing "Escape does not return :target-pos"
+    (let [registry (create-type-registry)
+          m (create-tile-map 10 10)
+          inputs (atom [:escape])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
+      (is (nil? (:target-pos result)))
+      (is (nil? (:look-info result)))))
+
+  (testing "Enter on entity returns entity in :look-info"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:name "Goblin" :description "A small goblin."})
+                       (define-tile-type :floor {:name "Floor"}))
+          goblin (create-entity :goblin \g :green 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          inputs (atom [:enter])
+          ctx {:registry registry
+               :input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+               :key-map default-key-map}
+          result (look-mode ctx m 5 5)]
+      (is (= [5 5] (:target-pos result)))
+      (is (= :entity (:category (:look-info result))))
+      (is (= goblin (:target (:look-info result)))))))
 
 (deftest player-act-look-mode-test
   (testing "with registry in ctx: enters look mode on x, returns message on Enter"
@@ -1633,6 +1673,99 @@
           result (player-act player m ctx)]
       ;; Entity bump should take priority
       (is (= "entity bump" (:message result))))))
+
+(deftest player-act-ranged-attack-test
+  (testing "ranged-attack enters look-mode, calls on-ranged-attack on Enter"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:name "Goblin"}))
+          ;; f enters ranged targeting, move right to goblin, Enter confirms
+          inputs (atom [\f \l :enter])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 6 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin))
+          ranged-called (atom nil)
+          on-ranged (fn [attacker game-map target-pos ctx]
+                      (reset! ranged-called target-pos)
+                      {:map game-map :message "You fire an arrow!"})
+          ctx {:input-fn input-fn
+               :key-map (assoc default-key-map \f :ranged-attack)
+               :registry registry
+               :on-ranged-attack on-ranged}
+          result (player-act player m ctx)]
+      (is (= [6 5] @ranged-called))
+      (is (= "You fire an arrow!" (:message result)))))
+
+  (testing "ranged-attack escape returns to input loop"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act}))
+          ;; f enters ranged targeting, escape cancels, then l moves
+          inputs (atom [\f :escape \l])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          ctx {:input-fn input-fn
+               :key-map (assoc default-key-map \f :ranged-attack)
+               :registry registry
+               :on-ranged-attack (fn [a gm tp ctx] {:map gm :message "fire!"})}
+          result (player-act player m ctx)]
+      ;; Should have moved right after escape
+      (is (= [6 5] (entity-pos (get-player (:map result)))))))
+
+  (testing "ranged-attack without :on-ranged-attack falls back to look message"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act})
+                       (update-in [:tile :floor] merge {:name "Stone Floor" :description "Cold grey stone."}))
+          ;; f enters targeting, move right (away from player entity), Enter on floor
+          inputs (atom [\f \l :enter])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          ctx {:input-fn input-fn
+               :key-map (assoc default-key-map \f :ranged-attack)
+               :registry registry}
+          result (player-act player m ctx)]
+      (is (= "Cold grey stone." (:message result)))))
+
+  (testing "ranged-attack without registry retries to next input"
+    (let [;; f is ranged-attack (no registry), retried, then q quits
+          inputs (atom [\f \q])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          ctx {:input-fn input-fn
+               :key-map (assoc default-key-map \f :ranged-attack \q :quit)}
+          result (player-act player m ctx)]
+      (is (:quit result))))
+
+  (testing "on-ranged-attack returning :retry causes input retry"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act}))
+          ;; f enters targeting, Enter confirms (on-ranged returns retry), then l moves
+          inputs (atom [\f :enter \l])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (add-entity player))
+          on-ranged (fn [a gm tp ctx]
+                      {:map gm :retry true :no-time true})
+          ctx {:input-fn input-fn
+               :key-map (assoc default-key-map \f :ranged-attack)
+               :registry registry
+               :on-ranged-attack on-ranged}
+          result (player-act player m ctx)]
+      ;; Retry from on-ranged → player moves right
+      (is (= [6 5] (entity-pos (get-player (:map result))))))))
 
 (deftest pass-through-actions-test
   (testing "action in :pass-through-actions returns as flag"

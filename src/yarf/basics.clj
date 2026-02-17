@@ -148,6 +148,82 @@
         (assoc :effect (if (:hit result) (hit-effect pos) (miss-effect pos)))
         (dissoc :hit))))
 
+;; Ranged combat
+
+(defn projectile-effect
+  "Creates a multi-frame projectile effect along the line from `from` to `to`.
+   Each frame shows a single character at successive positions (excluding start).
+   Default: '*' :cyan, 30ms per frame."
+  ([from to]
+   (projectile-effect from to \* :cyan))
+  ([from to ch color]
+   (let [points (rest (core/line from to))]
+     (core/make-effect
+       (mapv (fn [p] (core/make-effect-frame [(core/make-effect-cell p ch color)])) points)
+       30))))
+
+(defn ranged-attack
+  "Resolves a ranged attack: roll(ranged-attack) >= defense -> hit -> max(0, roll(ranged-damage) - armor).
+   Returns action-result with :message, updated :map, and :hit true on hit.
+   Uses type properties :ranged-attack (dice) and :ranged-damage (dice)."
+  [attacker game-map defender ctx]
+  (let [registry (:registry ctx)
+        atk-dice (core/get-property registry attacker :ranged-attack)
+        def-val (core/get-property registry defender :defense)
+        atk-roll (core/roll atk-dice)
+        a-name (attacker-name registry attacker)
+        d-name (defender-name registry defender)]
+    (if (>= atk-roll def-val)
+      (let [dmg-dice (core/get-property registry attacker :ranged-damage)
+            armor (or (core/get-property registry defender :armor) 0)
+            raw-dmg (core/roll dmg-dice)
+            actual-dmg (max 0 (- raw-dmg armor))
+            {:keys [map removed]} (apply-damage game-map defender actual-dmg)
+            msg (if removed
+                  (str a-name " " (hit-verb attacker) " " d-name
+                       " for " actual-dmg " damage, " (kill-suffix defender))
+                  (str a-name " " (hit-verb attacker) " " d-name
+                       " for " actual-dmg " damage."))]
+        {:map map :message msg :hit true})
+      {:map game-map
+       :message (str a-name " " (miss-verb attacker) " " d-name ".")})))
+
+(defn ranged-on-target
+  "on-ranged-attack callback: checks LOS, range, and entity at target.
+   Resolves ranged attack with projectile + hit/miss effects.
+   Uses type property :range (default 6) for max range.
+   Returns action-result with :effect and :message."
+  [attacker game-map [tx ty] ctx]
+  (let [registry (:registry ctx)
+        [ax ay] (core/entity-pos attacker)
+        from [ax ay]
+        to [tx ty]]
+    (cond
+      (= from to)
+      {:map game-map :retry true :no-time true}
+
+      (not (core/line-of-sight? registry game-map from to))
+      {:map game-map :message "You can't see there." :no-time true}
+
+      (let [max-range (or (core/get-property registry attacker :range) 6)]
+        (> (core/chebyshev-distance from to) max-range))
+      {:map game-map :message "Out of range." :no-time true}
+
+      :else
+      (let [targets (core/get-entities-at game-map tx ty)
+            target (first targets)]
+        (if-not target
+          {:map game-map :message "Nothing to shoot at." :no-time true}
+          (let [proj (projectile-effect from to)
+                result (ranged-attack attacker game-map target ctx)
+                hit-miss (if (:hit result)
+                           (hit-effect to)
+                           (miss-effect to))
+                combined (core/concat-effects proj hit-miss)]
+            (-> result
+                (assoc :effect combined)
+                (dissoc :hit))))))))
+
 ;; AI
 
 (defn wander
