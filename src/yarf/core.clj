@@ -144,6 +144,14 @@
     (:transparent tile)
     (or (get-type-property registry :tile (:type tile) :transparent) false)))
 
+(defn blocks-movement?
+  "Returns true if the entity blocks other entities from moving into its tile.
+   Checks instance :blocks-movement first, then type registry. Defaults to false."
+  [registry entity]
+  (if (contains? entity :blocks-movement)
+    (:blocks-movement entity)
+    (or (get-type-property registry :entity (:type entity) :blocks-movement) false)))
+
 (def default-tile floor-tile)
 
 (defn create-tile-map
@@ -526,7 +534,12 @@
         in-map (in-bounds? game-map new-x new-y)
         can-walk (and in-map (walkable? registry entity (get-tile game-map new-x new-y)))]
     (if can-walk
-      {:map (update-entity game-map entity move-entity-by dx dy)}
+      (let [blockers (filter #(blocks-movement? registry %)
+                             (get-entities-at game-map new-x new-y))
+            blocker (first blockers)]
+        (if blocker
+          {:map game-map :no-time true :retry true :bumped-entity blocker}
+          {:map (update-entity game-map entity move-entity-by dx dy)}))
       {:map game-map :no-time true :retry true})))
 
 (def direction-deltas
@@ -632,9 +645,13 @@
           ;; World action (movement etc.)
           action
           (let [result (execute-action registry action entity game-map)]
-            (if (:retry result)
-              (recur)
-              result))
+            (if-let [bumped (:bumped-entity result)]
+              (if-let [on-bump (:on-bump ctx)]
+                (on-bump entity game-map bumped ctx)
+                (recur))
+              (if (:retry result)
+                (recur)
+                result)))
 
           ;; Unknown key
           :else

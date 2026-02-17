@@ -108,7 +108,7 @@ Act functions receive `(entity, game-map, ctx)` and return an **action-result** 
 - `act-entity [map entity ctx]` - looks up act fn from `(:registry ctx)`, calls it with ctx, processes timing, returns action-result
 - `process-actors [map ctx]` - processes all actors, returns action-result with accumulated flags
 - `process-next-actor [map ctx]` - processes next actor, returns action-result
-- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn` from ctx
+- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn`, `:on-bump` from ctx
 
 **Context (ctx):**
 A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys:
@@ -117,6 +117,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `:key-map` - maps input keys to actions (required for player)
 - `:on-look-move` - `(fn [ctx game-map cx cy look-info])` callback during look mode
 - `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
+- `:on-bump` - `(fn [mover game-map bumped-entity ctx])` callback when player bumps a blocking entity; returns action-result. Without `:on-bump`, bumps retry like walls.
 - `:pass-through-actions` - set of action keywords that `player-act` returns as `{:action <keyword>}` for the game loop to handle (e.g. `#{:save}`)
 - Game-specific: `:screen`, `:viewport`, `:explored`, etc.
 
@@ -133,10 +134,12 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - Custom key maps: `{\w :move-up \s :move-down ...}`
 
 **Movement and terrain:**
-- `try-move [registry map entity dx dy]` - safe movement with bounds and walkability checks; returns action-result
+- `try-move [registry map entity dx dy]` - safe movement with bounds, walkability, and entity-blocking checks; returns action-result
 - Use `try-move` for all map-aware movement (players and NPCs)
 - Entities cannot move off map edges or into unwalkable tiles
 - Failed moves return `{:map game-map :no-time true :retry true}`
+- Moving into a tile with a blocking entity returns `{:map game-map :no-time true :retry true :bumped-entity entity}` — callers that ignore `:bumped-entity` get wall-like behavior (backward compatible)
+- `blocks-movement? [registry entity]` - checks if entity blocks movement (instance, then type registry, defaults to false). Follows the `contains?` pattern (instance overrides type, `false` is a valid value).
 - Entity abilities affect terrain interaction:
   - `:can-swim true` - entity can traverse water tiles
 
@@ -144,6 +147,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `player-act` loops until an action that affects the world is performed
 - Failed moves and unknown keys are retried immediately without consuming time
 - Valid actions (successful moves, quit) exit the loop
+- Bumping a blocking entity: if `:on-bump` is in ctx, calls it and returns its result; otherwise retries like a wall
 - `:look` and `:quit` are handled in `player-act`, not in `execute-action`
 - Without `:registry` in ctx, pressing look key is treated as unknown input (retried)
 
@@ -173,6 +177,7 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:retry` - action had no effect, poll for new input (used with `:no-time`)
 - `:quit` - signals game should exit
 - `:action` - pass-through action keyword (returned when action is in `:pass-through-actions`)
+- `:bumped-entity` - the blocking entity at the destination (set by `try-move` when movement is blocked by an entity, not by terrain)
 
 ### Map Generation (`yarf.core`)
 
@@ -236,7 +241,8 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
 - `Shift-S` to save game (writes `yarf-save.dat` in working directory)
 - On startup, prompts to load if a save file exists
-- Player and two wandering goblins (named `goblin-wander` act function in registry)
+- Player and two wandering goblins (named `goblin-wander` act function in registry); both have `:blocks-movement true`
+- Bump-attack: walking into a goblin kills it instantly (via `demo-on-bump` callback on `:on-bump` in ctx)
 - Type registry with tile/entity names, descriptions, and `:act` functions
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
@@ -255,10 +261,11 @@ Simple game loop demonstrating the framework. Run with `lein run`.
 
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
-- Add a context-sensitive default action for directional keypresses: inspect the target square and choose the appropriate action (move into empty floor, attack an entity, open a closed door, etc.) instead of always attempting movement.
+- Extend bump actions beyond attack: open closed doors on bump, push objects, etc. The `:on-bump` callback can inspect the bumped entity/tile and choose the appropriate action.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
 - Consider later: have entities and tiles hold a direct reference to their type at runtime, to avoid registry lookups on every access (deferred to see if it's needed).
 - Consider later: whether tiles in the map vector can be bare type keywords (e.g. `:floor` instead of `{:type :floor}`), saving even more space. Would need tiles with instance overrides to remain maps.
+- Add save file versioning: bump save version when game data format changes (e.g. new entity/tile properties), and handle migration from older versions in `restore-save-data`.
 - Support multiple maps in the world (e.g. dungeon levels, overworld, buildings). Needs a world structure that holds named maps, transitions between them (stairs, portals), and per-map explored state.
 
 ## Development Notes

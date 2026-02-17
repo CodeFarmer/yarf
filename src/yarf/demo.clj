@@ -29,9 +29,9 @@
   (-> (core/create-type-registry)
       (core/register-default-tile-types)
       (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."
-                                        :act core/player-act})
+                                        :act core/player-act :blocks-movement true})
       (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."
-                                        :act goblin-wander})
+                                        :act goblin-wander :blocks-movement true})
       ;; Override defaults to add names/descriptions (merge with existing properties)
       (update-in [:tile :floor] merge {:name "Stone Floor" :description "Cold grey stone."})
       (update-in [:tile :wall] merge {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
@@ -119,6 +119,13 @@
      (+ offset-x (dec width))
      (+ offset-y (dec height))]))
 
+(defn demo-on-bump
+  "Bump callback: instantly slays the bumped entity."
+  [entity game-map bumped-entity ctx]
+  (let [target-name (core/get-name (:registry ctx) bumped-entity)]
+    {:map (core/remove-entity game-map bumped-entity)
+     :message (str "You slay the " target-name "!")}))
+
 (defn create-demo-player
   "Creates a player for the demo."
   [x y]
@@ -171,21 +178,30 @@
             :else
             (recur map message explored)))))))
 
+(defn- prompt-screen
+  "Displays a message on the screen's message bar and waits for a key."
+  [screen viewport message]
+  (s/clear screen)
+  (let [{:keys [width height]} viewport]
+    (s/put-string screen 0 height message {:fg :white})
+    (s/redraw screen)
+    (s/get-key-blocking screen)))
+
 (defn- load-saved-game
   "Attempts to load a saved game. Returns {:game-map m :explored e} or nil."
-  []
+  [screen viewport]
   (when (.exists (java.io.File. save-file))
-    (println "Save file found. Load it? (y/n)")
-    (let [answer (read-line)]
-      (when (= "y" (.toLowerCase (.trim answer)))
+    (let [key (prompt-screen screen viewport "Save file found. Load it? (y/n)")]
+      (if (= \y key)
         (try
           (let [restored (core/load-game save-file)]
-            (println "Game loaded.")
+            (prompt-screen screen viewport "Game loaded. Press any key...")
             {:game-map (:game-map restored)
              :explored (:explored restored)})
           (catch Exception e
-            (println (str "Failed to load save: " (.getMessage e)))
-            nil))))))
+            (prompt-screen screen viewport (str "Failed to load: " (.getMessage e)))
+            nil))
+        nil))))
 
 (defn run-demo
   "Runs the demo game."
@@ -193,28 +209,27 @@
   (println "Starting YARF demo...")
   (println "Movement: hjkl (vi-style), yubn (diagonals)")
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
-  (println "Save: Shift-S")
-  (println "Quit: q or ESC")
+  (println "Save: Shift-S | Quit: q or ESC")
   (let [registry (create-demo-registry)
-        loaded (load-saved-game)
-        _ (when-not loaded
-            (println "Press Enter to start...")
-            (read-line))
         viewport (display/create-viewport 50 25)
         screen (s/get-screen :swing {:cols (:width viewport)
-                                     :rows (inc (:height viewport))})
-        base-ctx {:input-fn #(s/get-key-blocking screen)
-                  :key-map demo-key-map
-                  :registry registry
-                  :viewport viewport
-                  :screen screen
-                  :on-look-move demo-on-look-move
-                  :look-bounds-fn demo-look-bounds-fn
-                  :pass-through-actions #{:save}}]
+                                     :rows (inc (:height viewport))})]
     (s/start screen)
     (let [result (try
-                   (let [game-map (or (:game-map loaded) (create-demo-game))
-                         explored (or (:explored loaded) #{})]
+                   (let [loaded (load-saved-game screen viewport)
+                         _ (when-not loaded
+                             (prompt-screen screen viewport "Press any key to start..."))
+                         game-map (or (:game-map loaded) (create-demo-game))
+                         explored (or (:explored loaded) #{})
+                         base-ctx {:input-fn #(s/get-key-blocking screen)
+                                   :key-map demo-key-map
+                                   :registry registry
+                                   :viewport viewport
+                                   :screen screen
+                                   :on-look-move demo-on-look-move
+                                   :look-bounds-fn demo-look-bounds-fn
+                                   :on-bump demo-on-bump
+                                   :pass-through-actions #{:save}}]
                      (game-loop screen game-map base-ctx explored))
                    (finally
                      (s/stop screen)))]

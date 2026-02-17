@@ -1408,6 +1408,139 @@
         (finally
           (.delete (java.io.File. tmp-file)))))))
 
+(deftest try-move-entity-blocking-test
+  (let [reg (-> (create-type-registry)
+                (register-default-tile-types)
+                (define-entity-type :goblin {:blocks-movement true})
+                (define-entity-type :item {:blocks-movement false}))]
+    (testing "moving into a blocking entity returns :bumped-entity"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            goblin (create-entity :goblin \g :green 5 4)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity goblin))
+            result (try-move reg m player 0 -1)]
+        (is (= goblin (:bumped-entity result)))
+        (is (:no-time result))
+        (is (:retry result))
+        ;; Player didn't move
+        (is (= [5 5] (entity-pos (get-player (:map result)))))))
+    (testing "moving into a non-blocking entity succeeds"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            coin (create-entity :item \$ :yellow 5 4)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity coin))
+            result (try-move reg m player 0 -1)]
+        (is (nil? (:bumped-entity result)))
+        (is (nil? (:retry result)))
+        ;; Player moved
+        (is (= [5 4] (entity-pos (get-player (:map result)))))))
+    (testing "terrain-blocked move has no :bumped-entity"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            m (-> (create-tile-map 10 10)
+                  (set-tile 5 4 wall-tile)
+                  (add-entity player))
+            result (try-move reg m player 0 -1)]
+        (is (nil? (:bumped-entity result)))
+        (is (:retry result))))
+    (testing "entity without :blocks-movement defaults to non-blocking"
+      (let [reg2 (-> (create-type-registry)
+                     (register-default-tile-types)
+                     (define-entity-type :decoration {:name "Statue"}))
+            player (create-entity :player \@ :yellow 5 5)
+            statue (create-entity :decoration \& :gray 5 4)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity statue))
+            result (try-move reg2 m player 0 -1)]
+        (is (nil? (:bumped-entity result)))
+        (is (= [5 4] (entity-pos (get-player (:map result)))))))
+    (testing "only the first blocking entity is returned"
+      (let [g1 (create-entity :goblin \g :green 5 4)
+            g2 (create-entity :goblin \G :green 5 4)
+            player (create-entity :player \@ :yellow 5 5)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity g1)
+                  (add-entity g2))
+            result (try-move reg m player 0 -1)]
+        (is (some? (:bumped-entity result)))))))
+
+(deftest blocks-movement-test
+  (testing "returns true when entity type has :blocks-movement true"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:blocks-movement true}))
+          goblin (create-entity :goblin \g :green 5 5)]
+      (is (blocks-movement? registry goblin))))
+  (testing "returns false when entity type has :blocks-movement false"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :item {:blocks-movement false}))
+          item (create-entity :item \! :yellow 5 5)]
+      (is (not (blocks-movement? registry item)))))
+  (testing "defaults to false when :blocks-movement not defined"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :rock {:name "Rock"}))
+          rock (create-entity :rock \* :gray 5 5)]
+      (is (not (blocks-movement? registry rock)))))
+  (testing "instance :blocks-movement overrides type"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :goblin {:blocks-movement true}))
+          ghost-goblin (create-entity :goblin \g :green 5 5 {:blocks-movement false})]
+      (is (not (blocks-movement? registry ghost-goblin)))))
+  (testing "instance :blocks-movement true overrides type false"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :item {:blocks-movement false}))
+          blocking-item (create-entity :item \! :yellow 5 5 {:blocks-movement true})]
+      (is (blocks-movement? registry blocking-item))))
+  (testing "inherits from parent type"
+    (let [registry (-> (create-type-registry)
+                       (define-entity-type :creature {:blocks-movement true})
+                       (define-entity-type :goblin {:parent :creature}))
+          goblin (create-entity :goblin \g :green 5 5)]
+      (is (blocks-movement? registry goblin)))))
+
+(deftest player-act-bump-test
+  (testing "with :on-bump callback, bumping calls on-bump and returns its result"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:blocks-movement true :name "Goblin"}))
+          inputs (atom [\k])  ;; move up into goblin
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 5 4)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin))
+          on-bump (fn [mover game-map bumped ctx]
+                    {:map (remove-entity game-map bumped)
+                     :message (str "You slay the " (get-name (:registry ctx) bumped) "!")})
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry
+               :on-bump on-bump}
+          result (player-act player m ctx)]
+      (is (= "You slay the Goblin!" (:message result)))
+      ;; Goblin removed from map
+      (is (empty? (filter #(= :goblin (entity-type %)) (get-entities (:map result)))))
+      ;; Player didn't move (bump consumed the action)
+      (is (= [5 5] (entity-pos (get-player (:map result)))))))
+  (testing "without :on-bump, bumping retries until valid move"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:blocks-movement true}))
+          inputs (atom [\k \l])  ;; try up (blocked by goblin), then right (succeeds)
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 5 4)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin))
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
+          result (player-act player m ctx)]
+      ;; Player moved right (bump was retried like a wall)
+      (is (= [6 5] (entity-pos (get-player (:map result))))))))
+
 (deftest pass-through-actions-test
   (testing "action in :pass-through-actions returns as flag"
     (let [inputs (atom [\S])
