@@ -535,7 +535,9 @@
         (if blocker
           {:map game-map :no-time true :retry true :bumped-entity blocker}
           {:map (update-entity game-map entity move-entity-by dx dy)}))
-      {:map game-map :no-time true :retry true})))
+      (if in-map
+        {:map game-map :no-time true :retry true :bumped-pos [new-x new-y]}
+        {:map game-map :no-time true :retry true}))))
 
 (def direction-deltas
   "Maps movement actions to [dx dy] vectors."
@@ -644,9 +646,16 @@
               (if-let [on-bump (:on-bump ctx)]
                 (on-bump entity game-map bumped ctx)
                 (recur))
-              (if (:retry result)
-                (recur)
-                result)))
+              (if-let [bump-pos (:bumped-pos result)]
+                (if-let [on-bump-tile (:on-bump-tile ctx)]
+                  (let [tile-result (on-bump-tile entity game-map bump-pos ctx)]
+                    (if (:retry tile-result)
+                      (recur)
+                      tile-result))
+                  (recur))
+                (if (:retry result)
+                  (recur)
+                  result))))
 
           ;; Unknown key
           :else

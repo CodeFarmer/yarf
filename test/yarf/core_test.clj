@@ -1457,7 +1457,38 @@
                   (add-entity g1)
                   (add-entity g2))
             result (try-move reg m player 0 -1)]
-        (is (some? (:bumped-entity result)))))))
+        (is (some? (:bumped-entity result)))))
+    (testing "terrain-blocked in-bounds move returns :bumped-pos"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            m (-> (create-tile-map 10 10)
+                  (set-tile 5 4 {:type :wall})
+                  (add-entity player))
+            result (try-move reg m player 0 -1)]
+        (is (= [5 4] (:bumped-pos result)))
+        (is (:retry result))))
+    (testing "out-of-bounds move does not return :bumped-pos"
+      (let [player (create-entity :player \@ :yellow 0 0)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player))
+            result (try-move reg m player -1 0)]
+        (is (nil? (:bumped-pos result)))
+        (is (:retry result))))
+    (testing "successful move has no :bumped-pos"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player))
+            result (try-move reg m player 0 -1)]
+        (is (nil? (:bumped-pos result)))
+        (is (nil? (:retry result)))))
+    (testing "entity-blocked move has :bumped-entity but no :bumped-pos"
+      (let [player (create-entity :player \@ :yellow 5 5)
+            goblin (create-entity :goblin \g :green 5 4)
+            m (-> (create-tile-map 10 10)
+                  (add-entity player)
+                  (add-entity goblin))
+            result (try-move reg m player 0 -1)]
+        (is (some? (:bumped-entity result)))
+        (is (nil? (:bumped-pos result)))))))
 
 (deftest blocks-movement-test
   (testing "returns true when entity type has :blocks-movement true"
@@ -1532,6 +1563,76 @@
           result (player-act player m ctx)]
       ;; Player moved right (bump was retried like a wall)
       (is (= [6 5] (entity-pos (get-player (:map result))))))))
+
+(deftest player-act-bump-tile-test
+  (testing "with :on-bump-tile, walking into wall calls on-bump-tile"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act}))
+          inputs (atom [\k])  ;; move up into wall
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 {:type :wall})
+                (add-entity player))
+          on-bump-tile (fn [mover game-map [x y] ctx]
+                         {:map game-map :message "You bump the wall!"})
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry
+               :on-bump-tile on-bump-tile}
+          result (player-act player m ctx)]
+      (is (= "You bump the wall!" (:message result)))
+      (is (= [5 5] (entity-pos (get-player (:map result)))))))
+  (testing "on-bump-tile returning :retry causes input retry"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act}))
+          inputs (atom [\k \l])  ;; try up (wall, retried), then right (ok)
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 {:type :wall})
+                (add-entity player))
+          on-bump-tile (fn [mover game-map [x y] ctx]
+                         {:map game-map :retry true :no-time true})
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry
+               :on-bump-tile on-bump-tile}
+          result (player-act player m ctx)]
+      ;; Player moved right since wall bump was retried
+      (is (= [6 5] (entity-pos (get-player (:map result)))))))
+  (testing "without :on-bump-tile, wall moves retry as before"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act}))
+          inputs (atom [\k \l])  ;; try up (wall), then right
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          m (-> (create-tile-map 10 10)
+                (set-tile 5 4 {:type :wall})
+                (add-entity player))
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry}
+          result (player-act player m ctx)]
+      (is (= [6 5] (entity-pos (get-player (:map result)))))))
+  (testing "entity bump takes priority over tile bump"
+    (let [registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :player {:act player-act})
+                       (define-entity-type :goblin {:blocks-movement true}))
+          inputs (atom [\k])
+          input-fn #(let [i (first @inputs)] (swap! inputs rest) i)
+          player (create-entity :player \@ :yellow 5 5)
+          goblin (create-entity :goblin \g :green 5 4)
+          m (-> (create-tile-map 10 10)
+                (add-entity player)
+                (add-entity goblin))
+          on-bump (fn [mover game-map bumped ctx]
+                    {:map (remove-entity game-map bumped) :message "entity bump"})
+          on-bump-tile (fn [mover game-map [x y] ctx]
+                         {:map game-map :message "tile bump"})
+          ctx {:input-fn input-fn :key-map default-key-map :registry registry
+               :on-bump on-bump :on-bump-tile on-bump-tile}
+          result (player-act player m ctx)]
+      ;; Entity bump should take priority
+      (is (= "entity bump" (:message result))))))
 
 (deftest pass-through-actions-test
   (testing "action in :pass-through-actions returns as flag"

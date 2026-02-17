@@ -109,7 +109,7 @@ Act functions receive `(entity, game-map, ctx)` and return an **action-result** 
 - `act-entity [map entity ctx]` - looks up act fn from `(:registry ctx)`, calls it with ctx, processes timing, returns action-result
 - `process-actors [map ctx]` - processes all actors, returns action-result with accumulated flags
 - `process-next-actor [map ctx]` - processes next actor, returns action-result
-- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn`, `:on-bump` from ctx
+- `player-act [entity game-map ctx]` - named player act function; reads `:input-fn`, `:key-map`, `:registry`, `:on-look-move`, `:look-bounds-fn`, `:on-bump`, `:on-bump-tile` from ctx
 
 **Context (ctx):**
 A plain map passed to all act functions. Game-specific keys can be added freely. Standard keys:
@@ -119,6 +119,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `:on-look-move` - `(fn [ctx game-map cx cy look-info])` callback during look mode
 - `:look-bounds-fn` - `(fn [ctx game-map entity] [min-x min-y max-x max-y])` computes bounds at look-mode entry
 - `:on-bump` - `(fn [mover game-map bumped-entity ctx])` callback when player bumps a blocking entity; returns action-result. Without `:on-bump`, bumps retry like walls.
+- `:on-bump-tile` - `(fn [mover game-map [x y] ctx])` callback when player bumps a non-walkable in-bounds tile; returns action-result. If result has `:retry`, retries input. Without `:on-bump-tile`, terrain bumps retry like before. Entity bumps (`:on-bump`) take priority over tile bumps.
 - `:pass-through-actions` - set of action keywords that `player-act` returns as `{:action <keyword>}` for the game loop to handle (e.g. `#{:save}`)
 - Game-specific: `:screen`, `:viewport`, `:explored`, etc.
 
@@ -138,7 +139,8 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - `try-move [registry map entity dx dy]` - safe movement with bounds, walkability, and entity-blocking checks; returns action-result
 - Use `try-move` for all map-aware movement (players and NPCs)
 - Entities cannot move off map edges or into unwalkable tiles
-- Failed moves return `{:map game-map :no-time true :retry true}`
+- Failed moves into non-walkable in-bounds tiles return `{:map game-map :no-time true :retry true :bumped-pos [x y]}` — `:bumped-pos` tells callers which tile was bumped
+- Failed moves out of bounds return `{:map game-map :no-time true :retry true}` (no `:bumped-pos`)
 - Moving into a tile with a blocking entity returns `{:map game-map :no-time true :retry true :bumped-entity entity}` — callers that ignore `:bumped-entity` get wall-like behavior (backward compatible)
 - `blocks-movement? [registry entity]` - checks if entity blocks movement (instance, then type registry, defaults to false). Follows the `contains?` pattern (instance overrides type, `false` is a valid value).
 - Entity abilities affect terrain interaction:
@@ -149,6 +151,7 @@ A plain map passed to all act functions. Game-specific keys can be added freely.
 - Failed moves and unknown keys are retried immediately without consuming time
 - Valid actions (successful moves, quit) exit the loop
 - Bumping a blocking entity: if `:on-bump` is in ctx, calls it and returns its result; otherwise retries like a wall
+- Bumping a non-walkable tile: if `:on-bump-tile` is in ctx, calls it; if its result has `:retry`, retries input; otherwise returns the result. Without `:on-bump-tile`, retries like before.
 - `:look` and `:quit` are handled in `player-act`, not in `execute-action`
 - Without `:registry` in ctx, pressing look key is treated as unknown input (retried)
 
@@ -180,6 +183,7 @@ The `:map` key always contains the game map (clean, no flags embedded).
 - `:action` - pass-through action keyword (returned when action is in `:pass-through-actions`)
 - `:effect` - an effect map to play (propagated by `process-actors`, game loop calls `play-effect`)
 - `:bumped-entity` - the blocking entity at the destination (set by `try-move` when movement is blocked by an entity, not by terrain)
+- `:bumped-pos` - `[x y]` of the non-walkable tile bumped (set by `try-move` for in-bounds terrain blocks; not set for out-of-bounds or entity blocks)
 
 ### Dice Notation (`yarf.core`)
 
@@ -273,6 +277,46 @@ An extension point for ASCII special effects (hit flashes, explosions, projectil
 - Act functions (e.g. `on-bump`) can return `:effect` in their action-result
 - `process-actors` propagates `:effect` alongside `:quit`, `:message`, `:action`
 - Game loop checks `:effect` in result and calls `play-effect`
+
+### Basics (`yarf.basics`)
+
+Ready-to-use building blocks: named tiles, door mechanics, d20-style combat, and basic AI. Games can use these directly or as reference implementations.
+
+**Tiles:**
+- `basic-tile-descriptions` — map of names/descriptions for all 7 standard tile types
+- `register-basic-tile-types [registry]` — calls `core/register-default-tile-types` then merges names and descriptions. Replaces the manual `update-in` pattern.
+
+**Doors:**
+- `open-door [game-map x y]` — swaps `:door-closed` to `:door-open`, preserving instance properties
+- `close-door [game-map x y]` — swaps `:door-open` to `:door-closed`, preserving instance properties
+- `door-on-bump-tile [mover game-map [x y] ctx]` — `:on-bump-tile` callback: opens closed doors, returns `{:retry true}` for non-doors
+
+**Combat:**
+
+Type registry properties: `:max-hp`, `:attack` (dice string), `:defense` (number), `:damage` (dice string), `:armor` (number). Instance property: `:hp` (set at entity creation).
+
+Resolution: `roll(attack) >= defense` → hit → `max(0, roll(damage) - armor)` → HP ≤ 0 → entity removed from map.
+
+- `alive? [entity]` — `(:hp entity) > 0`
+- `apply-damage [game-map entity damage]` — reduces HP, removes at 0. Returns `{:map updated-map :removed true/nil}`
+- `melee-attack [attacker game-map defender ctx]` — full attack resolution. Returns action-result with `:message`. Uses `core/get-property` for instance-then-type lookup. Also returns `:hit true` on hit (stripped by `combat-on-bump`).
+- `combat-on-bump [mover game-map bumped ctx]` — `:on-bump` callback. Calls `melee-attack`, adds `:effect` (hit flash or miss dash).
+- `hit-effect [pos]` — 2-frame red/yellow flash
+- `miss-effect [pos]` — 1-frame white dash
+
+Messages are player-aware:
+- `"You hit the goblin for 4 damage."` / `"The goblin hits you for 3 damage."`
+- `"You miss the goblin."` / `"The goblin misses you."`
+- Kill: `"...killing it!"` / `"...killing you!"`
+
+Tests use `with-redefs` on `core/roll` for determinism.
+
+**AI:**
+- `wander [entity game-map ctx]` — random walk via `try-move`. Stands still if blocked.
+- `player-target-fn [entity game-map ctx]` — returns `(core/get-player game-map)`. Common target function.
+- `make-chase-act [target-fn]` — returns act function: if adjacent to target → `melee-attack`; if path exists (max-distance 20) → follow `find-path`; else → `wander`. `target-fn` signature: `(fn [entity game-map ctx] → entity or nil)`.
+
+`make-chase-act` is a closure factory (legitimate parameterization — different entity types can chase different targets). `find-path` is terrain-only; AI wastes a turn if another entity blocks the path.
 
 ### Map Generation (`yarf.core`)
 
@@ -378,7 +422,7 @@ An optional layer on top of single maps. Holds multiple named maps, transitions 
 
 ### Demo (`yarf.demo`)
 
-Two-level dungeon demo demonstrating the framework. Run with `lein run`.
+Two-level dungeon demo demonstrating the framework. Uses `yarf.basics` for combat, AI, and doors. Run with `lein run`.
 
 - `hjkl` to move, `yubn` for diagonals, `q` or ESC to quit
 - `x` to enter look mode: move cursor, Enter to inspect, Escape to cancel
@@ -386,9 +430,11 @@ Two-level dungeon demo demonstrating the framework. Run with `lein run`.
 - `Shift-S` to save game (writes `yarf-save.dat` in working directory)
 - On startup, prompts to load if a save file exists (handles both v1 and v2 saves)
 - Two dungeon levels connected by stairs (level-1 has `>` at [22 7], level-2 has `<` at [8 18])
-- Player starts on level-1; goblins wander on each level independently
-- Bump-attack: walking into a goblin kills it instantly with a red/yellow hit flash (via `demo-on-bump` callback on `:on-bump` in ctx, returns `:effect` in action-result)
-- Type registry with tile/entity names, descriptions, and `:act` functions (including stair tile descriptions)
+- Player starts on level-1; goblins chase and attack the player (via `basics/make-chase-act`)
+- d20-style combat: player (20 HP, 1d20+2 attack, 12 defense, 1d6+1 damage) vs goblins (5 HP, 1d20 attack, 8 defense, 1d4 damage). Hit/miss effects on bump. Uses `basics/combat-on-bump` as `:on-bump` callback.
+- Doors: level-1 has a closed door at [9 5]; walking into it opens it via `basics/door-on-bump-tile` as `:on-bump-tile` callback
+- Player death: game loop checks if player was killed after `process-actors`, ends game with death message
+- Type registry uses `basics/register-basic-tile-types` for named tiles with descriptions
 - Viewport follows player
 - Terminal cursor tracks the player; in look mode it tracks the examined square
 - Swing screen sized to fit viewport + message bar
@@ -408,7 +454,7 @@ Two-level dungeon demo demonstrating the framework. Run with `lein run`.
 
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
-- Extend bump actions beyond attack: open closed doors on bump, push objects, etc. The `:on-bump` callback can inspect the bumped entity/tile and choose the appropriate action.
+- Extend bump actions: push objects, etc. The `:on-bump` and `:on-bump-tile` callbacks can inspect the bumped entity/tile and choose the appropriate action. Door opening is provided by `basics/door-on-bump-tile`.
 - Consider later: move game-map into the context as well, simplifying the act signature to `(entity, ctx)` where ctx contains both the map and metadata.
 - Consider later: have entities and tiles hold a direct reference to their type at runtime, to avoid registry lookups on every access (deferred to see if it's needed).
 - Consider later: whether tiles in the map vector can be bare type keywords (e.g. `:floor` instead of `{:type :floor}`), saving even more space. Would need tiles with instance overrides to remain maps.

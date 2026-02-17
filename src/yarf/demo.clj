@@ -1,6 +1,7 @@
 (ns yarf.demo
   "Simple game loop demo to test the framework."
   (:require [yarf.core :as core]
+            [yarf.basics :as basics]
             [yarf.display :as display]
             [lanterna.screen :as s])
   (:gen-class))
@@ -17,28 +18,20 @@
           \> :descend
           \< :ascend}))
 
-(defn goblin-wander
-  "Act function for goblins: wander randomly."
-  [entity game-map ctx]
-  (let [dx (- (rand-int 3) 1)
-        dy (- (rand-int 3) 1)]
-    (core/try-move (:registry ctx) game-map entity dx dy)))
-
 (defn create-demo-registry
   "Creates a type registry for the demo with tile and entity descriptions."
   []
   (-> (core/create-type-registry)
-      (core/register-default-tile-types)
+      (basics/register-basic-tile-types)
       (core/define-entity-type :player {:name "Player" :description "That's you, the adventurer."
-                                        :act core/player-act :blocks-movement true})
+                                        :act core/player-act :blocks-movement true
+                                        :max-hp 20 :attack "1d20+2" :defense 12
+                                        :damage "1d6+1" :armor 0})
       (core/define-entity-type :goblin {:name "Goblin" :description "A small, green-skinned creature."
-                                        :act goblin-wander :blocks-movement true})
-      ;; Override defaults to add names/descriptions (merge with existing properties)
-      (update-in [:tile :floor] merge {:name "Stone Floor" :description "Cold grey stone."})
-      (update-in [:tile :wall] merge {:name "Stone Wall" :description "A solid wall of rough-hewn stone."})
-      (update-in [:tile :water] merge {:name "Water" :description "Dark, still water."})
-      (update-in [:tile :stairs-down] merge {:name "Stairs Down" :description "A staircase leading down."})
-      (update-in [:tile :stairs-up] merge {:name "Stairs Up" :description "A staircase leading up."})))
+                                        :act (basics/make-chase-act basics/player-target-fn)
+                                        :blocks-movement true
+                                        :max-hp 5 :attack "1d20" :defense 8
+                                        :damage "1d4" :armor 0})))
 
 (defn render-game
   "Renders the game to the screen. fov is the set of currently visible coords,
@@ -122,43 +115,28 @@
      (+ offset-x (dec width))
      (+ offset-y (dec height))]))
 
-(defn demo-hit-effect
-  "Creates a two-frame hit flash effect at the given position."
-  [pos]
-  (core/make-effect
-    [(core/make-effect-frame [(core/make-effect-cell pos \* :red)])
-     (core/make-effect-frame [(core/make-effect-cell pos \* :yellow)])]))
-
-(defn demo-on-bump
-  "Bump callback: instantly slays the bumped entity with a hit effect."
-  [entity game-map bumped-entity ctx]
-  (let [target-name (core/get-name (:registry ctx) bumped-entity)
-        pos (core/entity-pos bumped-entity)]
-    {:map (core/remove-entity game-map bumped-entity)
-     :message (str "You slay the " target-name "!")
-     :effect (demo-hit-effect pos)}))
-
 (defn create-demo-player
-  "Creates a player for the demo."
+  "Creates a player for the demo with combat stats."
   [x y]
-  (core/create-entity :player \@ :yellow x y))
+  (core/create-entity :player \@ :yellow x y {:hp 20}))
 
-(defn create-wandering-goblin
-  "Creates a goblin that wanders randomly."
+(defn create-goblin
+  "Creates a goblin with combat stats."
   [x y]
-  (core/create-entity :goblin \g :green x y))
+  (core/create-entity :goblin \g :green x y {:hp 5}))
 
 (def stairs-down-pos [22 7])
 (def stairs-up-pos [8 18])
 
 (defn create-demo-level-1
-  "Creates level 1: test map with stairs-down, player, and a goblin."
+  "Creates level 1: test map with stairs-down, a door, player, and a goblin."
   []
   (let [[sx sy] stairs-down-pos]
     (-> (core/generate-test-map 60 40)
         (core/set-tile sx sy {:type :stairs-down})
+        (core/set-tile 9 5 {:type :door-closed})
         (core/add-entity (create-demo-player 5 5))
-        (core/add-entity (create-wandering-goblin 18 6)))))
+        (core/add-entity (create-goblin 18 6)))))
 
 (defn create-demo-level-2
   "Creates level 2: test map with stairs-up and a goblin. No player (enters via transition)."
@@ -166,7 +144,7 @@
   (let [[sx sy] stairs-up-pos]
     (-> (core/generate-test-map 60 40)
         (core/set-tile sx sy {:type :stairs-up})
-        (core/add-entity (create-wandering-goblin 8 20)))))
+        (core/add-entity (create-goblin 8 20)))))
 
 (defn create-demo-world
   "Creates the demo world with two levels connected by stairs."
@@ -219,38 +197,49 @@
            explored (or initial-explored {})]
       (let [map-id (core/current-map-id world)
             game-map (core/current-map world)
-            player (core/get-player game-map)
-            fov (core/compute-entity-fov registry game-map player)
-            map-explored (into (get explored map-id #{}) fov)
-            explored (assoc explored map-id map-explored)
-            vp (center-viewport-on-player game-map (:viewport base-ctx))
-            level-msg (when message (str "[" (name map-id) "] " message))]
-        (render-game screen game-map vp level-msg fov map-explored registry)
-        (let [ctx (assoc base-ctx :explored map-explored)
-              result (core/process-actors game-map ctx)
-              {:keys [map quit message action effect]} result]
-          (when effect
-            (display/play-effect screen effect vp
-                                 {:render-base-fn (fn [scr]
-                                                    (render-game scr map vp nil fov map-explored registry))}))
-          (cond
-            quit :quit
+            player (core/get-player game-map)]
+        (if-not player
+          ;; Player died
+          :dead
+          (let [fov (core/compute-entity-fov registry game-map player)
+                map-explored (into (get explored map-id #{}) fov)
+                explored (assoc explored map-id map-explored)
+                vp (center-viewport-on-player game-map (:viewport base-ctx))
+                level-msg (when message (str "[" (name map-id) "] " message))]
+            (render-game screen game-map vp level-msg fov map-explored registry)
+            (let [ctx (assoc base-ctx :explored map-explored)
+                  result (core/process-actors game-map ctx)
+                  {:keys [map quit message action effect]} result]
+              (when effect
+                (display/play-effect screen effect vp
+                                     {:render-base-fn (fn [scr]
+                                                        (render-game scr map vp nil fov map-explored registry))}))
+              (cond
+                quit :quit
 
-            (= :save action)
-            (let [updated-world (core/set-current-map world map)]
-              (core/save-world save-file updated-world
-                               {:explored explored
-                                :viewport (:viewport base-ctx)})
-              :saved)
+                ;; Check if player died during this turn
+                (nil? (core/get-player map))
+                (do
+                  (render-game screen map vp
+                               (str "[" (name map-id) "] " (or message "You die..."))
+                               fov map-explored registry)
+                  :dead)
 
-            (#{:descend :ascend} action)
-            (let [[new-world msg] (handle-transition world map action)]
-              (if new-world
-                (recur new-world msg explored)
-                (recur world msg explored)))
+                (= :save action)
+                (let [updated-world (core/set-current-map world map)]
+                  (core/save-world save-file updated-world
+                                   {:explored explored
+                                    :viewport (:viewport base-ctx)})
+                  :saved)
 
-            :else
-            (recur (core/set-current-map world map) message explored)))))))
+                (#{:descend :ascend} action)
+                (let [[new-world msg] (handle-transition world map action)]
+                  (if new-world
+                    (recur new-world msg explored)
+                    (recur world msg explored)))
+
+                :else
+                (recur (core/set-current-map world map) message explored)))))))))
 
 (defn- prompt-screen
   "Displays a message on the screen's message bar and waits for a key."
@@ -311,13 +300,15 @@
                                    :screen screen
                                    :on-look-move demo-on-look-move
                                    :look-bounds-fn demo-look-bounds-fn
-                                   :on-bump demo-on-bump
+                                   :on-bump basics/combat-on-bump
+                                   :on-bump-tile basics/door-on-bump-tile
                                    :pass-through-actions #{:save :descend :ascend}}]
                      (game-loop screen world base-ctx explored))
                    (finally
                      (s/stop screen)))]
       (case result
         :saved (println "Game saved.")
+        :dead (println "You died! Game over.")
         (println "Demo ended.")))))
 
 (defn -main
