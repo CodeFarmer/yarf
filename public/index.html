@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>YARF Demo</title>
+  <style>
+    body {
+      background: #000;
+      color: #ccc;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #ffff00;
+      margin-bottom: 10px;
+    }
+    #game-canvas {
+      border: 1px solid #333;
+      image-rendering: pixelated;
+    }
+    .controls {
+      margin-top: 10px;
+      color: #888;
+      font-size: 14px;
+      text-align: center;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>YARF Demo</h1>
+  <canvas id="game-canvas"></canvas>
+  <div class="controls">
+    <div>Movement: <b>hjkl</b> (vi-style), <b>yubn</b> (diagonals)</div>
+    <div>Look: <b>x</b> | Fire: <b>f</b> | Stairs: <b>&gt;</b> / <b>&lt;</b></div>
+    <div>Save: <b>Shift-S</b> | Quit: <b>q</b> or <b>ESC</b></div>
+  </div>
+  <script src="/js/main.js"></script>
+</body>
+</html>

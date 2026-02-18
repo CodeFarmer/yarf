@@ -1,8 +1,29 @@
 (ns yarf.core
-  (:require [clojure.edn :as edn])
-  (:import [java.io PushbackReader InputStreamReader OutputStreamWriter
-            BufferedReader BufferedWriter FileInputStream FileOutputStream]
-           [java.util.zip GZIPInputStream GZIPOutputStream]))
+  (:require #?(:clj [clojure.edn :as edn]
+               :cljs [cljs.reader :as edn])
+            #?(:cljs [cljs.core.async :as async :refer [<!]]))
+  #?(:clj (:import [java.io PushbackReader InputStreamReader OutputStreamWriter
+                     BufferedReader BufferedWriter FileInputStream FileOutputStream]
+                    [java.util.zip GZIPInputStream GZIPOutputStream]))
+  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go]])))
+
+;; Cross-platform helpers
+
+(defn- parse-int [s]
+  #?(:clj (Integer/parseInt s)
+     :cljs (js/parseInt s 10)))
+
+(defn- abs-val [n]
+  #?(:clj (Math/abs (long n))
+     :cljs (js/Math.abs n)))
+
+(defn- sqrt-val [n]
+  #?(:clj (Math/sqrt n)
+     :cljs (js/Math.sqrt n)))
+
+(def ^:private max-double
+  #?(:clj Double/MAX_VALUE
+     :cljs js/Number.MAX_VALUE))
 
 ;; Type registry
 ;; Types define shared immutable properties for entities and tiles (description, lore, etc.)
@@ -448,6 +469,19 @@
   (first (filter #(= (:type %) (:type original-entity))
                  entities)))
 
+(defn- apply-action-timing
+  "Applies timing to an action-result: increments next-action for the acted entity."
+  [result entity]
+  (let [{:keys [map no-time time-cost]} result
+        acted-entity (find-acted-entity (get-entities map) entity)
+        updated-map (if (and acted-entity (not no-time))
+                      (if time-cost
+                        (update-entity map acted-entity increment-next-action time-cost)
+                        (update-entity map acted-entity increment-next-action))
+                      map)]
+    (assoc result :map updated-map)))
+
+#?(:clj
 (defn act-entity
   "Calls the entity's act function if it has one (looked up from registry in ctx).
    The act function receives (entity, game-map, ctx) and returns an action-result map
@@ -456,16 +490,17 @@
    if present, otherwise by its delay. If :no-time is set, no increment occurs."
   [tile-map entity ctx]
   (if-let [act-fn (get-type-property (:registry ctx) :entity (:type entity) :act)]
-    (let [result (act-fn entity tile-map ctx)
-          {:keys [map no-time time-cost]} result
-          acted-entity (find-acted-entity (get-entities map) entity)
-          updated-map (if (and acted-entity (not no-time))
-                        (if time-cost
-                          (update-entity map acted-entity increment-next-action time-cost)
-                          (update-entity map acted-entity increment-next-action))
-                        map)]
-      (assoc result :map updated-map))
+    (apply-action-timing (act-fn entity tile-map ctx) entity)
     {:map tile-map}))
+:cljs
+(defn act-entity
+  "Calls the entity's act function if it has one (looked up from registry in ctx).
+   On CLJS, returns a core.async channel that yields the action-result.
+   Act functions on CLJS must return channels."
+  [tile-map entity ctx]
+  (if-let [act-fn (get-type-property (:registry ctx) :entity (:type entity) :act)]
+    (go (apply-action-timing (<! (act-fn entity tile-map ctx)) entity))
+    (go {:map tile-map}))))
 
 (defn- get-next-actor
   "Returns the entity with the lowest next-action value that can act, or nil if none."
@@ -475,6 +510,16 @@
        (sort-by entity-next-action)
        first))
 
+(defn- accumulate-result
+  "Merges an act-entity result into an accumulator for process-actors."
+  [accum result]
+  (cond-> {:map (:map result)}
+    (or (:quit accum) (:quit result))       (assoc :quit true)
+    (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))
+    (or (:action accum) (:action result))   (assoc :action (or (:action result) (:action accum)))
+    (or (:effect accum) (:effect result))   (assoc :effect (or (:effect result) (:effect accum)))))
+
+#?(:clj
 (defn process-next-actor
   "Processes only the entity with the lowest next-action value.
    Returns an action-result map."
@@ -482,7 +527,16 @@
   (if-let [actor (get-next-actor tile-map (:registry ctx))]
     (act-entity tile-map actor ctx)
     {:map tile-map}))
+:cljs
+(defn process-next-actor
+  "Processes only the entity with the lowest next-action value.
+   On CLJS, returns a core.async channel that yields the action-result."
+  [tile-map ctx]
+  (if-let [actor (get-next-actor tile-map (:registry ctx))]
+    (act-entity tile-map actor ctx)
+    (go {:map tile-map}))))
 
+#?(:clj
 (defn process-actors
   "Processes all entities that have act functions.
    Returns an action-result map with :map, and accumulated :quit/:message flags."
@@ -491,18 +545,31 @@
     (reduce (fn [accum entity]
               (let [current-map (:map accum)]
                 (if (can-act? registry entity)
-                  ;; Re-fetch entity from map in case it was modified
                   (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
-                    (let [result (act-entity current-map current ctx)]
-                      (cond-> {:map (:map result)}
-                        (or (:quit accum) (:quit result))       (assoc :quit true)
-                        (or (:message accum) (:message result)) (assoc :message (or (:message result) (:message accum)))
-                        (or (:action accum) (:action result))   (assoc :action (or (:action result) (:action accum)))
-                        (or (:effect accum) (:effect result))   (assoc :effect (or (:effect result) (:effect accum)))))
+                    (accumulate-result accum (act-entity current-map current ctx))
                     accum)
                   accum)))
             {:map tile-map}
             (get-entities tile-map))))
+:cljs
+(defn process-actors
+  "Processes all entities that have act functions.
+   On CLJS, returns a core.async channel that yields the action-result."
+  [tile-map ctx]
+  (let [registry (:registry ctx)
+        entities (get-entities tile-map)]
+    (go (loop [accum {:map tile-map}
+               remaining entities]
+          (if (empty? remaining)
+            accum
+            (let [entity (first remaining)
+                  current-map (:map accum)]
+              (if (can-act? registry entity)
+                (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
+                  (let [result (<! (act-entity current-map current ctx))]
+                    (recur (accumulate-result accum result) (rest remaining)))
+                  (recur accum (rest remaining)))
+                (recur accum (rest remaining))))))))))
 
 ;; Player input handling
 
@@ -563,6 +630,7 @@
                 (>= y min-y) (<= y max-y)))
          true)))
 
+#?(:clj
 (defn look-mode
   "Enters look mode: cursor starts at (start-x, start-y), moves with directional keys.
    Reads from ctx: :registry, :input-fn, :key-map, :on-look-move.
@@ -607,7 +675,44 @@
              ;; Unknown key: ignore
              :else
              (recur cx cy))))))))
+:cljs
+(defn look-mode
+  "Enters look mode (CLJS). Returns a core.async channel.
+   input-fn must return a channel."
+  ([ctx game-map start-x start-y]
+   (look-mode ctx game-map start-x start-y nil))
+  ([ctx game-map start-x start-y bounds]
+   (let [{:keys [registry input-fn key-map on-look-move]} ctx]
+     (go (loop [cx start-x
+                cy start-y]
+           (let [look-info (look-at registry game-map cx cy)]
+             (when on-look-move
+               (on-look-move ctx game-map cx cy look-info))
+             (let [input (<! (input-fn))
+                   action (get key-map input)]
+               (cond
+                 (= input :enter)
+                 {:map game-map :no-time true
+                  :message (or (:description look-info)
+                               (str "You see " (:name look-info) "."))
+                  :target-pos [cx cy]
+                  :look-info look-info}
 
+                 (= input :escape)
+                 {:map game-map :no-time true}
+
+                 (direction-deltas action)
+                 (let [[dx dy] (direction-deltas action)
+                       nx (+ cx dx)
+                       ny (+ cy dy)]
+                   (if (in-look-bounds? game-map bounds nx ny)
+                     (recur nx ny)
+                     (recur cx cy)))
+
+                 :else
+                 (recur cx cy))))))))))
+
+#?(:clj
 (defn player-act
   "Player act function. Reads :input-fn, :key-map, :registry, :look-bounds-fn,
    :pass-through-actions from ctx. Loops until an action that affects the world
@@ -681,6 +786,70 @@
           ;; Unknown key
           :else
           (recur))))))
+:cljs
+(defn player-act
+  "Player act function (CLJS). Returns a core.async channel.
+   input-fn must return a channel."
+  [entity game-map ctx]
+  (let [{:keys [input-fn key-map registry look-bounds-fn pass-through-actions]} ctx]
+    (go (loop []
+          (let [input (<! (input-fn))
+                action (get key-map input)]
+            (cond
+              (= action :quit)
+              {:map game-map :quit true}
+
+              (and (= action :look) registry)
+              (let [[px py] (entity-pos entity)
+                    bounds (when look-bounds-fn
+                             (look-bounds-fn ctx game-map entity))
+                    result (<! (look-mode ctx game-map px py bounds))]
+                (if (:message result)
+                  result
+                  (recur)))
+
+              (= action :look)
+              (recur)
+
+              (and (= action :ranged-attack) registry)
+              (let [[px py] (entity-pos entity)
+                    bounds (when look-bounds-fn
+                             (look-bounds-fn ctx game-map entity))
+                    result (<! (look-mode ctx game-map px py bounds))]
+                (if-let [target-pos (:target-pos result)]
+                  (if-let [on-ranged (:on-ranged-attack ctx)]
+                    (let [ranged-result (on-ranged entity game-map target-pos ctx)]
+                      (if (:retry ranged-result)
+                        (recur)
+                        ranged-result))
+                    result)
+                  (recur)))
+
+              (= action :ranged-attack)
+              (recur)
+
+              (and pass-through-actions (contains? pass-through-actions action))
+              {:map game-map :no-time true :action action}
+
+              action
+              (let [result (execute-action registry action entity game-map)]
+                (if-let [bumped (:bumped-entity result)]
+                  (if-let [on-bump (:on-bump ctx)]
+                    (on-bump entity game-map bumped ctx)
+                    (recur))
+                  (if-let [bump-pos (:bumped-pos result)]
+                    (if-let [on-bump-tile (:on-bump-tile ctx)]
+                      (let [tile-result (on-bump-tile entity game-map bump-pos ctx)]
+                        (if (:retry tile-result)
+                          (recur)
+                          tile-result))
+                      (recur))
+                    (if (:retry result)
+                      (recur)
+                      result))))
+
+              :else
+              (recur))))))))
 
 ;; Save/Load
 
@@ -698,6 +867,7 @@
                     {:version (:version save-data)})))
   save-data)
 
+#?(:clj
 (defn save-game
   "Saves game state to a gzipped EDN file."
   [file-path game-map save-state]
@@ -706,8 +876,9 @@
                         (GZIPOutputStream.)
                         (OutputStreamWriter. "UTF-8")
                         (BufferedWriter.))]
-      (.write out (pr-str save-data)))))
+      (.write out (pr-str save-data))))))
 
+#?(:clj
 (defn load-game
   "Loads game state from a gzipped EDN file."
   [file-path]
@@ -717,7 +888,7 @@
                                      (BufferedReader.)
                                      (PushbackReader.))]
                     (edn/read in))]
-    (restore-save-data save-data)))
+    (restore-save-data save-data))))
 
 ;; Dice notation
 
@@ -729,13 +900,13 @@
     ;; Dice notation: optional count, d, sides, optional modifier
     (re-matches #"(\d*)d(\d+)([+-]\d+)?" notation)
     (let [[_ n s m] (re-matches #"(\d*)d(\d+)([+-]\d+)?" notation)]
-      {:count (if (empty? n) 1 (Integer/parseInt n))
-       :sides (Integer/parseInt s)
-       :modifier (if m (Integer/parseInt m) 0)})
+      {:count (if (empty? n) 1 (parse-int n))
+       :sides (parse-int s)
+       :modifier (if m (parse-int m) 0)})
 
     ;; Constant: optional sign + digits
     (re-matches #"[+-]?\d+" notation)
-    {:count 0 :sides 0 :modifier (Integer/parseInt notation)}
+    {:count 0 :sides 0 :modifier (parse-int notation)}
 
     :else
     (throw (ex-info (str "Invalid dice notation: " (pr-str notation))
@@ -764,14 +935,14 @@
   [pos1 pos2]
   (let [[x1 y1] pos1
         [x2 y2] pos2]
-    (max (Math/abs (- x2 x1)) (Math/abs (- y2 y1)))))
+    (max (abs-val (- x2 x1)) (abs-val (- y2 y1)))))
 
 (defn manhattan-distance
   "Returns the Manhattan distance between two [x y] positions."
   [pos1 pos2]
   (let [[x1 y1] pos1
         [x2 y2] pos2]
-    (+ (Math/abs (- x2 x1)) (Math/abs (- y2 y1)))))
+    (+ (abs-val (- x2 x1)) (abs-val (- y2 y1)))))
 
 (defn euclidean-distance
   "Returns the Euclidean distance between two [x y] positions as a double."
@@ -780,7 +951,7 @@
         [x2 y2] pos2
         dx (- x2 x1)
         dy (- y2 y1)]
-    (Math/sqrt (+ (* dx dx) (* dy dy)))))
+    (sqrt-val (+ (* dx dx) (* dy dy)))))
 
 (defn line
   "Returns a vector of [x y] points along a line from `from` to `to` (inclusive)
@@ -788,8 +959,8 @@
   [from to]
   (let [[x0 y0] from
         [x1 y1] to
-        dx (Math/abs (- x1 x0))
-        dy (- (Math/abs (- y1 y0)))
+        dx (abs-val (- x1 x0))
+        dy (- (abs-val (- y1 y0)))
         sx (if (< x0 x1) 1 -1)
         sy (if (< y0 y1) 1 -1)]
     (loop [x x0 y y0 err (+ dx dy) pts []]
@@ -897,7 +1068,7 @@
                                       (closed neighbor)
                                       (and max-dist (> tentative-g max-dist)))
                                 [open g-score came-from]
-                                (if (< tentative-g (get g-score neighbor Double/MAX_VALUE))
+                                (if (< tentative-g (get g-score neighbor max-double))
                                   (let [f (+ tentative-g (chebyshev-distance neighbor to))
                                         old-g (get g-score neighbor)
                                         open (if old-g
@@ -1013,6 +1184,7 @@
   [world save-state]
   (merge {:version 2 :world world} save-state))
 
+#?(:clj
 (defn save-world
   "Saves world state to a gzipped EDN file."
   [file-path world save-state]
@@ -1021,4 +1193,4 @@
                         (GZIPOutputStream.)
                         (OutputStreamWriter. "UTF-8")
                         (BufferedWriter.))]
-      (.write out (pr-str save-data)))))
+      (.write out (pr-str save-data))))))

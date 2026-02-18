@@ -12,3 +12,7 @@ pom.xml.asc
 .hgignore
 .hg/
 yarf-save.dat
+node_modules/
+public/js/
+.shadow-cljs/
+package-lock.json

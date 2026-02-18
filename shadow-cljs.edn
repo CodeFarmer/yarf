@@ -1,0 +1,10 @@
+{:source-paths ["src" "test"]
+ :dependencies [[org.clojure/core.async "1.6.681"]]
+ :builds {:app {:target :browser
+                :output-dir "public/js"
+                :asset-path "/js"
+                :modules {:main {:init-fn yarf.demo-web/init!}}
+                :devtools {:after-load yarf.demo-web/on-reload}}
+          :test {:target :browser-test
+                 :test-dir "public/js/test"
+                 :ns-regexp "yarf\\..*-test$"}}}

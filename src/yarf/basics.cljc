@@ -1,7 +1,9 @@
 (ns yarf.basics
   "Ready-to-use building blocks for roguelike games.
    Provides named tiles, door mechanics, combat, and basic AI."
-  (:require [yarf.core :as core]))
+  (:require [yarf.core :as core]
+            #?(:cljs [cljs.core.async :as async :refer [<!]]))
+  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go]])))
 
 ;; Tiles
 
@@ -226,6 +228,7 @@
 
 ;; AI
 
+#?(:clj
 (defn wander
   "Act function: moves entity in a random direction via try-move.
    Stands still if blocked."
@@ -233,36 +236,65 @@
   (let [dx (- (rand-int 3) 1)
         dy (- (rand-int 3) 1)]
     (core/try-move (:registry ctx) game-map entity dx dy)))
+:cljs
+(defn wander
+  "Act function (CLJS): moves entity in a random direction via try-move.
+   Returns a core.async channel."
+  [entity game-map ctx]
+  (let [dx (- (rand-int 3) 1)
+        dy (- (rand-int 3) 1)]
+    (go (core/try-move (:registry ctx) game-map entity dx dy)))))
 
 (defn player-target-fn
   "Common target function: returns the player entity from the map."
   [entity game-map ctx]
   (core/get-player game-map))
 
+(defn- chase-act-logic
+  "Core chase logic: returns action-result (not wrapped in channel)."
+  [entity game-map ctx target-fn]
+  (let [target (target-fn entity game-map ctx)]
+    (if-not target
+      nil ;; signals: wander
+      (let [registry (:registry ctx)
+            entity-pos (core/entity-pos entity)
+            target-pos (core/entity-pos target)
+            dist (core/chebyshev-distance entity-pos target-pos)]
+        (if (<= dist 1)
+          {:attack target}
+          (if-let [path (core/find-path registry game-map entity entity-pos target-pos
+                                        {:max-distance 20})]
+            (if (>= (count path) 2)
+              (let [[nx ny] (second path)
+                    [ex ey] entity-pos
+                    dx (- nx ex)
+                    dy (- ny ey)]
+                {:move [dx dy]})
+              nil)
+            nil))))))
+
+#?(:clj
 (defn make-chase-act
   "Returns an act function that chases a target. If adjacent, attacks via melee-attack.
    If pathable (max-distance 20), follows find-path. Otherwise wanders.
    target-fn: (fn [entity game-map ctx]) -> target entity or nil."
   [target-fn]
   (fn [entity game-map ctx]
-    (let [target (target-fn entity game-map ctx)]
-      (if-not target
-        (wander entity game-map ctx)
-        (let [registry (:registry ctx)
-              entity-pos (core/entity-pos entity)
-              target-pos (core/entity-pos target)
-              dist (core/chebyshev-distance entity-pos target-pos)]
-          (if (<= dist 1)
-            ;; Adjacent: attack
-            (melee-attack entity game-map target ctx)
-            ;; Try pathfinding
-            (if-let [path (core/find-path registry game-map entity entity-pos target-pos
-                                          {:max-distance 20})]
-              (if (>= (count path) 2)
-                (let [[nx ny] (second path)
-                      [ex ey] entity-pos
-                      dx (- nx ex)
-                      dy (- ny ey)]
-                  (core/try-move registry game-map entity dx dy))
-                (wander entity game-map ctx))
-              (wander entity game-map ctx))))))))
+    (let [decision (chase-act-logic entity game-map ctx target-fn)]
+      (cond
+        (nil? decision) (wander entity game-map ctx)
+        (:attack decision) (melee-attack entity game-map (:attack decision) ctx)
+        (:move decision) (let [[dx dy] (:move decision)]
+                           (core/try-move (:registry ctx) game-map entity dx dy))))))
+:cljs
+(defn make-chase-act
+  "Returns an act function that chases a target (CLJS). Returns a core.async channel."
+  [target-fn]
+  (fn [entity game-map ctx]
+    (let [decision (chase-act-logic entity game-map ctx target-fn)]
+      (go (cond
+            (nil? decision) (core/try-move (:registry ctx) game-map entity
+                                           (- (rand-int 3) 1) (- (rand-int 3) 1))
+            (:attack decision) (melee-attack entity game-map (:attack decision) ctx)
+            (:move decision) (let [[dx dy] (:move decision)]
+                               (core/try-move (:registry ctx) game-map entity dx dy))))))))

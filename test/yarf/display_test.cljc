@@ -1,11 +1,14 @@
 (ns yarf.display-test
-  (:require [clojure.test :refer :all]
-            [yarf.display :refer :all]
+  (:require #?(:clj [clojure.test :refer :all]
+               :cljs [cljs.test :refer [deftest testing is are]])
+            [yarf.display :as display :refer [create-viewport center-viewport-on
+                                              clamp-to-map world-to-screen screen-to-world]]
+            #?(:clj [yarf.display.curses :as curses])
             [yarf.core :as core]))
 
 ;; Mock display for testing
 (defrecord MockDisplay [input-atom rendered-atom message-atom]
-  Display
+  display/Display
   (get-input [this] @input-atom)
   (render-tile [this x y tile registry]
     (swap! rendered-atom conj {:x x :y y :char (core/tile-char registry tile) :color (core/tile-color registry tile)}))
@@ -25,12 +28,12 @@
 (deftest display-protocol-test
   (testing "mock display implements protocol"
     (let [d (make-mock-display :up)]
-      (is (satisfies? Display d))
-      (is (= :up (get-input d)))))
+      (is (satisfies? display/Display d))
+      (is (= :up (display/get-input d)))))
   (testing "mock display tracks rendered content"
     (let [reg (core/register-default-tile-types (core/create-type-registry))
           d (make-mock-display)]
-      (render-tile d 5 5 {:type :wall} reg)
+      (display/render-tile d 5 5 {:type :wall} reg)
       (is (= 1 (count @(:rendered-atom d))))
       (is (= \# (:char (first @(:rendered-atom d))))))))
 
@@ -79,11 +82,12 @@
 (deftest display-message-test
   (testing "display-message shows message in message bar"
     (let [d (make-mock-display)]
-      (display-message d "Hello, world!")
+      (display/display-message d "Hello, world!")
       (is (= "Hello, world!" @(:message-atom d))))))
 
-;; Effect playback tests
+;; Effect playback tests (JVM only — uses curses/play-effect)
 
+#?(:clj
 (deftest play-effect-test
   (testing "empty effect doesn't crash"
     (let [calls (atom [])
@@ -91,7 +95,7 @@
           effect (core/make-effect [])
           vp (create-viewport 20 10)]
       ;; play-effect with empty frames should be a no-op
-      (play-effect mock-screen effect vp)))
+      (curses/play-effect mock-screen effect vp)))
   (testing "single-frame effect renders cells via render-char"
     (let [render-calls (atom [])
           refresh-calls (atom 0)
@@ -102,10 +106,10 @@
           effect (core/make-effect [frame])
           vp (-> (create-viewport 20 10)
                  (assoc :offset-x 0 :offset-y 0))]
-      (with-redefs [render-char (fn [scr x y ch color]
+      (with-redefs [curses/render-char (fn [scr x y ch color]
                                   (swap! render-calls conj {:x x :y y :char ch :color color}))
-                    refresh (fn [scr] (swap! refresh-calls inc))]
-        (play-effect mock-screen effect vp {:frame-ms 0}))
+                    curses/refresh (fn [scr] (swap! refresh-calls inc))]
+        (curses/play-effect mock-screen effect vp {:frame-ms 0}))
       (is (= 1 (count @render-calls)))
       (is (= {:x 5 :y 3 :char \* :color :red} (first @render-calls)))
       (is (= 1 @refresh-calls))))
@@ -116,10 +120,10 @@
           frame (core/make-effect-frame [cell])
           effect (core/make-effect [frame])
           vp (create-viewport 20 10)]
-      (with-redefs [render-char (fn [scr x y ch color]
+      (with-redefs [curses/render-char (fn [scr x y ch color]
                                   (swap! render-calls conj {:x x :y y}))
-                    refresh (fn [scr] nil)]
-        (play-effect mock-screen effect vp {:frame-ms 0}))
+                    curses/refresh (fn [scr] nil)]
+        (curses/play-effect mock-screen effect vp {:frame-ms 0}))
       (is (empty? @render-calls))))
   (testing "render-base-fn is called each frame"
     (let [base-calls (atom 0)
@@ -128,9 +132,9 @@
           f2 (core/make-effect-frame [(core/make-effect-cell [2 2] \* :blue)])
           effect (core/make-effect [f1 f2])
           vp (create-viewport 20 10)]
-      (with-redefs [render-char (fn [& _] nil)
-                    refresh (fn [_] nil)]
-        (play-effect mock-screen effect vp
+      (with-redefs [curses/render-char (fn [& _] nil)
+                    curses/refresh (fn [_] nil)]
+        (curses/play-effect mock-screen effect vp
                      {:frame-ms 0
                       :render-base-fn (fn [scr] (swap! base-calls inc))}))
-      (is (= 2 @base-calls)))))
+      (is (= 2 @base-calls))))))

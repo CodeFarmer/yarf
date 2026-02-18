@@ -3,6 +3,7 @@
   (:require [yarf.core :as core]
             [yarf.basics :as basics]
             [yarf.display :as display]
+            [yarf.display.curses :as curses]
             [lanterna.screen :as s])
   (:gen-class))
 
@@ -213,7 +214,7 @@
                   result (core/process-actors game-map ctx)
                   {:keys [map quit message action effect]} result]
               (when effect
-                (display/play-effect screen effect vp
+                (curses/play-effect screen effect vp
                                      {:render-base-fn (fn [scr]
                                                         (render-game scr map vp nil fov map-explored registry))}))
               (cond

@@ -1,7 +1,33 @@
 (ns yarf.core-test
-  (:require [clojure.test :refer :all]
-            [clojure.edn :as edn]
-            [yarf.core :refer :all]))
+  (:require #?(:clj [clojure.test :refer :all]
+               :cljs [cljs.test :refer [deftest testing is are]])
+            #?(:clj [clojure.edn :as edn]
+               :cljs [cljs.reader :as edn])
+            [yarf.core :as core :refer [create-type-registry define-tile-type define-entity-type
+                                        get-type-property get-instance-type-property get-property
+                                        get-name get-description
+                                        make-tile default-tile-types register-default-tile-types
+                                        tile-char tile-color walkable? transparent? blocks-movement?
+                                        create-tile-map map-width map-height in-bounds?
+                                        get-tile set-tile fill-rect make-room make-corridor generate-test-map
+                                        compute-fov compute-entity-fov
+                                        create-entity entity-type entity-char entity-color entity-pos
+                                        entity-delay entity-next-action move-entity move-entity-by
+                                        get-entities add-entity remove-entity get-entities-at look-at update-entity
+                                        create-player get-player
+                                        act-entity process-next-actor process-actors
+                                        default-key-map try-move direction-deltas execute-action
+                                        look-mode player-act
+                                        prepare-save-data restore-save-data
+                                        parse-dice roll-detail roll
+                                        chebyshev-distance manhattan-distance euclidean-distance
+                                        line line-of-sight? entities-in-radius nearest-entity find-path
+                                        make-effect-cell make-effect-frame make-effect concat-effects
+                                        create-world current-map-id current-map set-current-map get-world-map
+                                        add-transition add-transition-pair get-transition
+                                        transition-at-entity apply-transition
+                                        prepare-world-save-data
+                                        #?@(:clj [save-game load-game save-world])]]))
 
 (deftest create-tile-map-test
   (testing "creates a tile map with specified dimensions"
@@ -1371,7 +1397,8 @@
       (is (= #{[1 1]} (:explored restored)))))
   (testing "throws on unsupported version"
     (let [save-data {:version 99 :game-map (create-tile-map 5 5)}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"Unsupported save version"
             (restore-save-data save-data))))))
 
 (deftest edn-round-trip-test
@@ -1408,6 +1435,7 @@
       ;; Explored set
       (is (= explored (:explored restored))))))
 
+#?(:clj
 (deftest save-load-game-test
   (testing "save and load round-trip via gzip file"
     (let [player (create-entity :player \@ :yellow 5 5)
@@ -1438,7 +1466,7 @@
         (is (thrown? Exception
               (load-game tmp-file)))
         (finally
-          (.delete (java.io.File. tmp-file)))))))
+          (.delete (java.io.File. tmp-file))))))))
 
 (deftest try-move-entity-blocking-test
   (let [reg (-> (create-type-registry)
@@ -1935,7 +1963,8 @@
     (let [save-data {:version 1 :game-map (create-tile-map 5 5)}]
       (is (= 1 (:version (restore-save-data save-data))))))
   (testing "still rejects unsupported versions"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported save version"
+    (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                          #"Unsupported save version"
           (restore-save-data {:version 99})))))
 
 ;; Dice tests
@@ -1968,11 +1997,11 @@
   (testing "parses 1d1"
     (is (= {:count 1 :sides 1 :modifier 0} (parse-dice "1d1"))))
   (testing "throws on invalid notation"
-    (is (thrown? Exception (parse-dice "")))
-    (is (thrown? Exception (parse-dice "abc")))
-    (is (thrown? Exception (parse-dice "d")))
-    (is (thrown? Exception (parse-dice "2d")))
-    (is (thrown? Exception (parse-dice "2d6+")))))
+    (is (thrown? #?(:clj Exception :cljs js/Error) (parse-dice "")))
+    (is (thrown? #?(:clj Exception :cljs js/Error) (parse-dice "abc")))
+    (is (thrown? #?(:clj Exception :cljs js/Error) (parse-dice "d")))
+    (is (thrown? #?(:clj Exception :cljs js/Error) (parse-dice "2d")))
+    (is (thrown? #?(:clj Exception :cljs js/Error) (parse-dice "2d6+")))))
 
 (deftest roll-test
   (testing "roll returns integer within expected range"
@@ -2333,6 +2362,7 @@
           combined (concat-effects e1)]
       (is (= 1 (count (:frames combined)))))))
 
+#?(:clj
 (deftest save-load-world-test
   (testing "world save and load round-trip via gzip file"
     (let [player (create-entity :player \@ :yellow 5 5)
@@ -2365,5 +2395,5 @@
           (is (= :stairs-down (:type (get-tile (current-map (:world restored)) 5 5))))
           (is (= :stairs-up (:type (get-tile (get-world-map (:world restored) :level-2) 2 3)))))
         (finally
-          (.delete (java.io.File. tmp-file)))))))
+          (.delete (java.io.File. tmp-file))))))))
 

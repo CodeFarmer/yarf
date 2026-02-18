@@ -1,5 +1,6 @@
 (ns yarf.basics-test
-  (:require [clojure.test :refer :all]
+  (:require #?(:clj [clojure.test :refer :all]
+               :cljs [cljs.test :refer [deftest testing is are]])
             [yarf.core :as core]
             [yarf.basics :as basics]))
 
