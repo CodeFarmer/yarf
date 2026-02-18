@@ -78,13 +78,13 @@ Tile instances on the map are minimal (just `{:type :floor}`). Display and behav
 
 Entities are game objects (players, monsters, items) with position and display properties. Position is stored as `:pos [x y]`.
 
-- `create-entity [type char color x y]` or `[type char color x y props]`
+- `create-entity [type char color x y]` or `[type char color x y props]` — auto-assigns an incrementing integer `:id`. Callers can supply `:id` in properties to override (e.g. loaded saves preserve their original IDs).
 - `entity-type`, `entity-char`, `entity-color` - accessors
 - `entity-pos` - returns `[x y]` position vector
 - `move-entity [entity x y]` / `move-entity-by [entity dx dy]` - low-level movement (no bounds checking)
 
 **Map entity management:**
-- `add-entity` / `remove-entity` - add/remove from map
+- `add-entity` / `remove-entity` - add/remove from map. `remove-entity` matches by `:id` when available, falling back to structural equality for backward compatibility.
 - `get-entities` / `get-entities-at [map x y]` - query entities
 - `update-entity [map entity f & args]` - update entity in place
 
@@ -475,7 +475,6 @@ Two-level dungeon demo demonstrating the framework. Uses `yarf.basics` for comba
 - Add save file migration: when save version changes, implement migration from older versions in `restore-save-data` (v1 -> v2 is handled by demo's `load-saved-game`, but core could offer a general migration hook).
 - Support more transition types beyond stairs: portals, zone boundaries, etc. The transition structure is generic (position-to-position mapping); game loops can define their own triggering logic.
 - Seeded random number generation: deterministic RNG threaded through ctx for reproducible map generation, combat, AI, etc. (would also make dice rolls deterministic via an optional rng parameter)
-- Entity identity: `remove-entity` uses structural equality (`#{entity}`), which means entities with identical field values are interchangeable. Consider adding unique `:id` fields to entities to make identity explicit, especially for `remove-entity`, `update-entity`, and `find-acted-entity`.
 
 ## Development Notes
 

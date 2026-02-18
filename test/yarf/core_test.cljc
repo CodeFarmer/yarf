@@ -2541,3 +2541,86 @@
       ;; Retry from on-bump-tile → player moves right
       (is (= [6 5] (entity-pos (get-player (:map result))))))))
 
+;; Entity identity tests
+
+(deftest entity-id-test
+  (testing "create-entity assigns a unique :id"
+    (let [e (create-entity :goblin \g :green 5 5)]
+      (is (some? (:id e)))
+      (is (integer? (:id e)))))
+  (testing "two entities get different :id values"
+    (let [e1 (create-entity :goblin \g :green 5 5)
+          e2 (create-entity :goblin \g :green 5 5)]
+      (is (not= (:id e1) (:id e2)))))
+  (testing "caller can supply :id in properties"
+    (let [e (create-entity :goblin \g :green 5 5 {:id 999})]
+      (is (= 999 (:id e)))))
+  (testing "create-player gets an :id"
+    (let [p (create-player 5 5)]
+      (is (some? (:id p)))
+      (is (integer? (:id p))))))
+
+(deftest remove-entity-by-id-test
+  (testing "mutated entity (different HP) still removed by :id"
+    (let [goblin (create-entity :goblin \g :green 5 5 {:hp 10})
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          ;; Simulate HP change — different structural value, same :id
+          damaged-goblin (assoc goblin :hp 3)]
+      (is (= 1 (count (get-entities m))))
+      (let [m2 (remove-entity m damaged-goblin)]
+        (is (empty? (get-entities m2))))))
+  (testing "entity without :id falls back to structural equality"
+    (let [raw-entity {:type :rock :char \* :color :gray :pos [3 3]}
+          m (-> (create-tile-map 10 10)
+                (add-entity raw-entity))
+          m2 (remove-entity m raw-entity)]
+      (is (empty? (get-entities m2))))))
+
+(deftest update-entity-by-id-test
+  (testing "update-entity works on mutated entity via :id"
+    (let [goblin (create-entity :goblin \g :green 5 5 {:hp 10})
+          m (-> (create-tile-map 10 10)
+                (add-entity goblin))
+          ;; First update: change HP (as if damage was applied)
+          m2 (update-entity m goblin assoc :hp 3)
+          damaged (first (get-entities m2))
+          ;; Second update: move the damaged entity
+          m3 (update-entity m2 damaged move-entity 7 7)
+          moved (first (get-entities m3))]
+      (is (= 3 (:hp moved)))
+      (is (= [7 7] (entity-pos moved))))))
+
+(deftest find-acted-entity-by-id-test
+  (testing "two same-type entities: process-next-actor updates the correct one's timing"
+    (let [move-right (fn [entity game-map _ctx]
+                       {:map (update-entity game-map entity move-entity-by 1 0)})
+          registry (-> (create-type-registry)
+                       (register-default-tile-types)
+                       (define-entity-type :goblin {:act move-right}))
+          g1 (create-entity :goblin \g :green 3 3 {:next-action 0})
+          g2 (create-entity :goblin \g :green 7 7 {:next-action 5})
+          m (-> (create-tile-map 10 10)
+                (add-entity g1)
+                (add-entity g2))
+          result (process-next-actor m {:registry registry})
+          entities (get-entities (:map result))
+          ;; g1 had lower next-action (0), so it acted — find it by id
+          acted (first (filter #(= (:id g1) (:id %)) entities))
+          other (first (filter #(= (:id g2) (:id %)) entities))]
+      ;; g1 moved right and got timing incremented
+      (is (= [4 3] (entity-pos acted)))
+      (is (= 10 (entity-next-action acted)))
+      ;; g2 stayed put with unchanged timing
+      (is (= [7 7] (entity-pos other)))
+      (is (= 5 (entity-next-action other))))))
+
+(deftest entity-id-edn-roundtrip-test
+  (testing "integer id survives pr-str -> edn/read-string"
+    (let [e (create-entity :goblin \g :green 5 5 {:hp 10})
+          id (:id e)
+          edn-str (pr-str e)
+          restored (edn/read-string edn-str)]
+      (is (= id (:id restored)))
+      (is (integer? (:id restored))))))
+

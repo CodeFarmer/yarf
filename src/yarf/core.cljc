@@ -25,6 +25,11 @@
   #?(:clj Double/MAX_VALUE
      :cljs js/Number.MAX_VALUE))
 
+(def ^:private next-id (atom 0))
+
+(defn- gen-id []
+  (swap! next-id inc))
+
 ;; Type registry
 ;; Types define shared immutable properties for entities and tiles (description, lore, etc.)
 ;; Types can have a :parent for single inheritance.
@@ -344,7 +349,7 @@
   ([entity-type char color x y]
    (create-entity entity-type char color x y {}))
   ([entity-type char color x y properties]
-   (merge {:type entity-type :char char :color color :pos [x y]} properties)))
+   (merge {:id (gen-id) :type entity-type :char char :color color :pos [x y]} properties)))
 
 (defn entity-type
   "Returns the type of an entity."
@@ -400,9 +405,12 @@
   (update tile-map :entities conj entity))
 
 (defn remove-entity
-  "Removes an entity from the map."
+  "Removes an entity from the map. Matches by :id when available,
+   falls back to structural equality for backward compatibility."
   [tile-map entity]
-  (update tile-map :entities #(vec (remove #{entity} %))))
+  (if-let [id (:id entity)]
+    (update tile-map :entities #(vec (remove (fn [e] (= id (:id e))) %)))
+    (update tile-map :entities #(vec (remove #{entity} %)))))
 
 (defn get-entities-at
   "Returns all entities at the specified position."
@@ -463,11 +471,17 @@
   ([entity time]
    (assoc entity :next-action (+ (entity-next-action entity) time))))
 
+(defn- find-entity-by-id
+  "Finds entity by :id, falling back to structural equality when :id is nil."
+  [entities entity]
+  (if-let [id (:id entity)]
+    (first (filter #(= id (:id %)) entities))
+    (first (filter #(= entity %) entities))))
+
 (defn- find-acted-entity
-  "Finds the entity that acted by matching type."
+  "Finds the entity that acted by matching :id (or structural equality as fallback)."
   [entities original-entity]
-  (first (filter #(= (:type %) (:type original-entity))
-                 entities)))
+  (find-entity-by-id entities original-entity))
 
 (defn- apply-action-timing
   "Applies timing to an action-result: increments next-action for the acted entity."
@@ -545,7 +559,7 @@
     (reduce (fn [accum entity]
               (let [current-map (:map accum)]
                 (if (can-act? registry entity)
-                  (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
+                  (if-let [current (find-entity-by-id (get-entities current-map) entity)]
                     (accumulate-result accum (act-entity current-map current ctx))
                     accum)
                   accum)))
@@ -565,7 +579,7 @@
             (let [entity (first remaining)
                   current-map (:map accum)]
               (if (can-act? registry entity)
-                (if-let [current (first (filter #(= entity %) (get-entities current-map)))]
+                (if-let [current (find-entity-by-id (get-entities current-map) entity)]
                   (let [result (<! (act-entity current-map current ctx))]
                     (recur (accumulate-result accum result) (rest remaining)))
                   (recur accum (rest remaining)))
