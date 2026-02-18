@@ -96,9 +96,30 @@
     (display/refresh-screen canvas-disp)))
 
 (defn render-look-frame
-  "Renders the game with look info in message bar."
+  "Renders the game with a highlighted cursor at (cx, cy) and look info in message bar."
   [canvas-disp game-map viewport cx cy look-info fov explored registry]
-  (render-game canvas-disp game-map viewport (:name look-info) fov explored registry))
+  (render-game canvas-disp game-map viewport (:name look-info) fov explored registry)
+  (let [{:keys [width height offset-x offset-y]} viewport
+        sx (- cx offset-x)
+        sy (- cy offset-y)]
+    (when (and (>= sx 0) (< sx width)
+               (>= sy 0) (< sy height))
+      ;; Draw cursor: white background with black character
+      (let [tile (when (core/in-bounds? game-map cx cy) (core/get-tile game-map cx cy))
+            entity (first (core/get-entities-at game-map cx cy))
+            ch (cond entity (str (core/entity-char entity))
+                     tile (str (core/tile-char registry tile))
+                     :else " ")
+            ctx-2d (:ctx-2d canvas-disp)
+            px (* sx canvas/cell-width)
+            py (* sy canvas/cell-height)]
+        (set! (.-fillStyle ctx-2d) "#ffffff")
+        (.fillRect ctx-2d px py canvas/cell-width canvas/cell-height)
+        (set! (.-fillStyle ctx-2d) "#000000")
+        (set! (.-font ctx-2d) canvas/font-str)
+        (set! (.-textBaseline ctx-2d) "top")
+        (.fillText ctx-2d ch px py)))
+    (display/refresh-screen canvas-disp)))
 
 (defn center-viewport-on-player [game-map viewport]
   (if-let [player (core/get-player game-map)]
@@ -219,6 +240,23 @@
         (js/console.error "Failed to load save:" e)
         nil))))
 
+(defn- start-game
+  "Starts a game session. Returns a channel that completes when the session ends."
+  [canvas-disp input-fn base-ctx]
+  (let [loaded (load-saved-game)
+        world (or (:world loaded) (create-demo-world))
+        explored (or (:explored loaded) {})]
+    (go (let [result (<! (game-loop canvas-disp world base-ctx explored))
+              msg (case result
+                    :saved "Game saved. Press any key to continue..."
+                    :dead "You died! Game over. Press any key to restart..."
+                    "Demo ended. Press any key to restart...")]
+          (when (not= :saved result)
+            (io/delete-save save-key))
+          (display/display-message canvas-disp msg)
+          (<! (input-fn))
+          result))))
+
 (defn ^:export init!
   "Entry point for the browser demo."
   []
@@ -227,9 +265,6 @@
       (let [registry (create-demo-registry)
             viewport (display/create-viewport 50 25)
             {:keys [display input-fn]} (canvas/create-canvas-display viewport canvas-el)
-            loaded (load-saved-game)
-            world (or (:world loaded) (create-demo-world))
-            explored (or (:explored loaded) {})
             base-ctx {:input-fn input-fn
                       :key-map demo-key-map
                       :registry registry
@@ -241,11 +276,9 @@
                       :on-bump-tile basics/door-on-bump-tile
                       :on-ranged-attack basics/ranged-on-target
                       :pass-through-actions #{:save :descend :ascend}}]
-        (go (let [result (<! (game-loop display world base-ctx explored))]
-              (case result
-                :saved (display/display-message display "Game saved.")
-                :dead (display/display-message display "You died! Game over.")
-                (display/display-message display "Demo ended."))))))))
+        (go (loop []
+              (<! (start-game display input-fn base-ctx))
+              (recur)))))))
 
 (defn on-reload
   "Called by shadow-cljs after hot reload."

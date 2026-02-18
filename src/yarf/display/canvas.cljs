@@ -41,9 +41,9 @@
 
 ;; Canvas display
 
-(def ^:private cell-width 12)
-(def ^:private cell-height 18)
-(def ^:private font-str "16px monospace")
+(def cell-width 12)
+(def cell-height 18)
+(def font-str "16px monospace")
 
 (defrecord CanvasDisplay [canvas ctx-2d viewport input-ch]
   display/Display
