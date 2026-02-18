@@ -18,7 +18,16 @@
           \S :save
           \> :descend
           \< :ascend
-          \f :ranged-attack}))
+          \f :ranged-attack
+          ;; Ctrl+direction: bump without moving
+          :ctrl-h :bump-left
+          :ctrl-j :bump-down
+          :ctrl-k :bump-up
+          :ctrl-l :bump-right
+          :ctrl-y :bump-up-left
+          :ctrl-u :bump-up-right
+          :ctrl-b :bump-down-left
+          :ctrl-n :bump-down-right}))
 
 (defn create-demo-registry []
   (-> (core/create-type-registry)

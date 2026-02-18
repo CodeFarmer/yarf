@@ -43,13 +43,18 @@
     (core/set-tile game-map x y (assoc tile :type :door-closed))))
 
 (defn door-on-bump-tile
-  "on-bump-tile callback: opens a closed door at the bumped position.
+  "on-bump-tile callback: opens a closed door or closes an open door.
    Non-door tiles return {:retry true :no-time true}."
   [mover game-map [x y] ctx]
   (let [tile (core/get-tile game-map x y)]
-    (if (= :door-closed (:type tile))
+    (cond
+      (= :door-closed (:type tile))
       {:map (open-door game-map x y)
        :message "You open the door."}
+      (= :door-open (:type tile))
+      {:map (close-door game-map x y)
+       :message "You close the door."}
+      :else
       {:map game-map :retry true :no-time true})))
 
 ;; Combat

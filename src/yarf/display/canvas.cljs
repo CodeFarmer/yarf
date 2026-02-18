@@ -24,20 +24,24 @@
 ;; Key translation
 
 (defn- translate-browser-key
-  "Maps a KeyboardEvent.key string to YARF key values."
-  [key-str]
-  (case key-str
-    "Enter" :enter
-    "Escape" :escape
-    "ArrowUp" :up
-    "ArrowDown" :down
-    "ArrowLeft" :left
-    "ArrowRight" :right
-    "Backspace" :backspace
-    "Tab" :tab
-    ;; Single character keys
-    (when (= 1 (count key-str))
-      (first key-str))))
+  "Maps a KeyboardEvent.key string to YARF key values.
+   When ctrl? is true, single-char keys return :ctrl-<char> keywords."
+  ([key-str] (translate-browser-key key-str false))
+  ([key-str ctrl?]
+   (case key-str
+     "Enter" :enter
+     "Escape" :escape
+     "ArrowUp" :up
+     "ArrowDown" :down
+     "ArrowLeft" :left
+     "ArrowRight" :right
+     "Backspace" :backspace
+     "Tab" :tab
+     ;; Single character keys
+     (when (= 1 (count key-str))
+       (if ctrl?
+         (keyword (str "ctrl-" key-str))
+         (first key-str))))))
 
 ;; Canvas display
 
@@ -142,7 +146,7 @@
     ;; Set up keydown handler
     (.addEventListener js/document "keydown"
       (fn [e]
-        (when-let [key (translate-browser-key (.-key e))]
+        (when-let [key (translate-browser-key (.-key e) (.-ctrlKey e))]
           (.preventDefault e)
           (async/put! input-ch key))))
     ;; Return display and input function

@@ -612,6 +612,28 @@
    :move-up-left [-1 -1] :move-up-right [1 -1]
    :move-down-left [-1 1] :move-down-right [1 1]})
 
+(def bump-deltas
+  "Maps bump actions to [dx dy] vectors."
+  {:bump-up [0 -1] :bump-down [0 1] :bump-left [-1 0] :bump-right [1 0]
+   :bump-up-left [-1 -1] :bump-up-right [1 -1]
+   :bump-down-left [-1 1] :bump-down-right [1 1]})
+
+(defn try-bump
+  "Checks the position at (dx, dy) from entity without moving.
+   Returns action-result with :bumped-entity or :bumped-pos (for ANY in-bounds tile,
+   including walkable). Out-of-bounds returns retry with neither."
+  [registry game-map entity dx dy]
+  (let [[x y] (entity-pos entity)
+        nx (+ x dx)
+        ny (+ y dy)]
+    (if (in-bounds? game-map nx ny)
+      (let [blocker (first (filter #(blocks-movement? registry %)
+                                   (get-entities-at game-map nx ny)))]
+        (if blocker
+          {:map game-map :no-time true :retry true :bumped-entity blocker}
+          {:map game-map :no-time true :retry true :bumped-pos [nx ny]}))
+      {:map game-map :no-time true :retry true})))
+
 (defn execute-action
   "Executes a world action (movement), returning an action-result map.
    Player-only actions (:look, :quit) are handled in player-act."
@@ -765,6 +787,23 @@
           (and pass-through-actions (contains? pass-through-actions action))
           {:map game-map :no-time true :action action}
 
+          ;; Bump action (interact without moving)
+          (bump-deltas action)
+          (let [[dx dy] (bump-deltas action)
+                result (try-bump registry game-map entity dx dy)]
+            (if-let [bumped (:bumped-entity result)]
+              (if-let [on-bump (:on-bump ctx)]
+                (on-bump entity game-map bumped ctx)
+                (recur))
+              (if-let [bump-pos (:bumped-pos result)]
+                (if-let [on-bump-tile (:on-bump-tile ctx)]
+                  (let [tile-result (on-bump-tile entity game-map bump-pos ctx)]
+                    (if (:retry tile-result)
+                      (recur)
+                      tile-result))
+                  (recur))
+                (recur))))
+
           ;; World action (movement etc.)
           action
           (let [result (execute-action registry action entity game-map)]
@@ -830,6 +869,22 @@
 
               (and pass-through-actions (contains? pass-through-actions action))
               {:map game-map :no-time true :action action}
+
+              (bump-deltas action)
+              (let [[dx dy] (bump-deltas action)
+                    result (try-bump registry game-map entity dx dy)]
+                (if-let [bumped (:bumped-entity result)]
+                  (if-let [on-bump (:on-bump ctx)]
+                    (on-bump entity game-map bumped ctx)
+                    (recur))
+                  (if-let [bump-pos (:bumped-pos result)]
+                    (if-let [on-bump-tile (:on-bump-tile ctx)]
+                      (let [tile-result (on-bump-tile entity game-map bump-pos ctx)]
+                        (if (:retry tile-result)
+                          (recur)
+                          tile-result))
+                      (recur))
+                    (recur))))
 
               action
               (let [result (execute-action registry action entity game-map)]

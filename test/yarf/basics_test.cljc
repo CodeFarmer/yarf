@@ -96,14 +96,16 @@
             result (basics/door-on-bump-tile player m [5 4] ctx)]
         (is (:retry result))
         (is (:no-time result))))
-    (testing "open door returns retry (already open)"
+    (testing "open door is closed and returns message"
       (let [player (core/create-entity :player \@ :yellow 5 5)
             m (-> (core/create-tile-map 10 10)
                   (core/set-tile 5 4 {:type :door-open})
                   (core/add-entity player))
             ctx {:registry reg}
             result (basics/door-on-bump-tile player m [5 4] ctx)]
-        (is (:retry result))))))
+        (is (= :door-closed (:type (core/get-tile (:map result) 5 4))))
+        (is (= "You close the door." (:message result)))
+        (is (nil? (:retry result)))))))
 
 ;; Combat tests
 

@@ -11,14 +11,25 @@
 
 (def demo-key-map
   "Key bindings for demo: vi-style movement plus quit, Shift-S to save,
-   > to descend stairs, < to ascend stairs, f to fire ranged attack."
+   > to descend stairs, < to ascend stairs, f to fire ranged attack,
+   Ctrl+direction to bump without moving."
   (merge core/default-key-map
          {\q :quit
           :escape :quit
           \S :save
           \> :descend
           \< :ascend
-          \f :ranged-attack}))
+          \f :ranged-attack
+          ;; Ctrl+direction: bump without moving (control chars)
+          (char 8)  :bump-left       ;; Ctrl+H
+          (char 10) :bump-down       ;; Ctrl+J
+          (char 11) :bump-up         ;; Ctrl+K
+          (char 12) :bump-right      ;; Ctrl+L
+          (char 25) :bump-up-left    ;; Ctrl+Y
+          (char 21) :bump-up-right   ;; Ctrl+U
+          (char 2)  :bump-down-left  ;; Ctrl+B
+          (char 14) :bump-down-right ;; Ctrl+N
+          }))
 
 (defn create-demo-registry
   "Creates a type registry for the demo with tile and entity descriptions."
@@ -282,6 +293,7 @@
   []
   (println "Starting YARF demo...")
   (println "Movement: hjkl (vi-style), yubn (diagonals)")
+  (println "Bump: Ctrl+direction (interact without moving)")
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
   (println "Fire: f (select target, Enter to fire, Escape to cancel)")
   (println "Stairs: > to descend, < to ascend")
