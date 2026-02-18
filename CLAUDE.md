@@ -475,6 +475,7 @@ Two-level dungeon demo demonstrating the framework. Uses `yarf.basics` for comba
 - Add save file migration: when save version changes, implement migration from older versions in `restore-save-data` (v1 -> v2 is handled by demo's `load-saved-game`, but core could offer a general migration hook).
 - Support more transition types beyond stairs: portals, zone boundaries, etc. The transition structure is generic (position-to-position mapping); game loops can define their own triggering logic.
 - Seeded random number generation: deterministic RNG threaded through ctx for reproducible map generation, combat, AI, etc. (would also make dice rolls deterministic via an optional rng parameter)
+- Entity identity: `remove-entity` uses structural equality (`#{entity}`), which means entities with identical field values are interchangeable. Consider adding unique `:id` fields to entities to make identity explicit, especially for `remove-entity`, `update-entity`, and `find-acted-entity`.
 
 ## Development Notes
 

@@ -247,10 +247,11 @@
                   :saved)
 
                 (#{:descend :ascend} action)
-                (let [[new-world msg] (handle-transition world map action)]
+                (let [updated-world (core/set-current-map world map)
+                      [new-world msg] (handle-transition updated-world map action)]
                   (if new-world
                     (recur new-world msg explored)
-                    (recur world msg explored)))
+                    (recur updated-world msg explored)))
 
                 :else
                 (recur (core/set-current-map world map) message explored)))))))))
