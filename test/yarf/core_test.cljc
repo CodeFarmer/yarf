@@ -1385,7 +1385,13 @@
       (is (= :goblin (:type saved-goblin)))
       (is (= [5 5] (:pos saved-goblin)))
       (is (= 10 (:hp saved-goblin)))
-      (is (= 15 (:delay saved-goblin))))))
+      (is (= 15 (:delay saved-goblin)))))
+  (testing "includes :next-entity-id"
+    (let [_ (create-entity :goblin \g :green 0 0)
+          m (create-tile-map 5 5)
+          save-data (prepare-save-data m {})]
+      (is (integer? (:next-entity-id save-data)))
+      (is (pos? (:next-entity-id save-data))))))
 
 (deftest restore-save-data-test
   (testing "returns full state map"
@@ -1400,7 +1406,37 @@
     (let [save-data {:version 99 :game-map (create-tile-map 5 5)}]
       (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
                             #"Unsupported save version"
-            (restore-save-data save-data))))))
+            (restore-save-data save-data)))))
+  (testing "restores entity id counter from :next-entity-id"
+    (let [save-data {:version 1
+                     :game-map (create-tile-map 5 5)
+                     :next-entity-id 42}]
+      (restore-save-data save-data)
+      ;; Next entity should get id 43
+      (let [e (create-entity :test \t :white 0 0)]
+        (is (= 43 (:id e))))))
+  (testing "scans entities for max :id when :next-entity-id absent (v1)"
+    (let [save-data {:version 1
+                     :game-map (-> (create-tile-map 10 10)
+                                   (add-entity {:type :goblin :char \g :color :green :pos [5 5] :id 50})
+                                   (add-entity {:type :orc :char \o :color :green :pos [3 3] :id 30}))}]
+      (restore-save-data save-data)
+      ;; Counter set to max(50, 30) = 50, next entity gets 51
+      (let [e (create-entity :test \t :white 0 0)]
+        (is (= 51 (:id e))))))
+  (testing "scans entities for max :id when :next-entity-id absent (v2)"
+    (let [m1 (-> (create-tile-map 5 5)
+                 (add-entity {:type :goblin :char \g :color :green :pos [1 1] :id 10}))
+          m2 (-> (create-tile-map 5 5)
+                 (add-entity {:type :orc :char \o :color :green :pos [2 2] :id 25}))
+          save-data {:version 2
+                     :world {:maps {:a m1 :b m2}
+                             :current-map-id :a
+                             :transitions {}}}]
+      (restore-save-data save-data)
+      ;; Counter set to max(10, 25) = 25, next entity gets 26
+      (let [e (create-entity :test \t :white 0 0)]
+        (is (= 26 (:id e)))))))
 
 (deftest edn-round-trip-test
   (testing "full pipeline: prepare -> EDN serialize -> deserialize -> restore"

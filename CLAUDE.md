@@ -349,21 +349,22 @@ Uses **recursive shadow casting** across 8 octants. Opaque tiles (walls, closed 
 Saves game state as gzipped EDN. Since entities don't carry `:act` functions (behavior lives in the registry), save/load is straightforward — no stripping or restoring needed.
 
 **Single-map save (v1):**
-- `prepare-save-data [game-map save-state]` - adds `:version 1`, merges save-state (e.g. `:explored`, `:viewport`)
+- `prepare-save-data [game-map save-state]` - adds `:version 1` and `:next-entity-id`, merges save-state (e.g. `:explored`, `:viewport`)
 - `save-game [file-path game-map save-state]` - writes gzipped EDN to file
 
 **World save (v2):**
-- `prepare-world-save-data [world save-state]` - adds `:version 2`, merges save-state
+- `prepare-world-save-data [world save-state]` - adds `:version 2` and `:next-entity-id`, merges save-state
 - `save-world [file-path world save-state]` - writes gzipped EDN to file
 
 **Common:**
-- `restore-save-data [save-data]` - validates version (1 or 2); throws on unsupported version
+- `restore-save-data [save-data]` - validates version (1 or 2), restores entity id counter; throws on unsupported version. If `:next-entity-id` is present, resets the counter to that value. If absent (old saves), scans entities for the highest `:id` and uses that.
 - `load-game [file-path]` - reads gzipped EDN, validates version, returns raw data map. Caller checks `:version` to determine format.
 
 **Save v1 format (single-map):**
 ```clojure
 {:version 1
  :game-map <game-map>
+ :next-entity-id 42          ;; entity id counter
  :explored #{[x y] ...}    ;; game-specific
  :viewport {...}}           ;; game-specific
 ```
@@ -374,6 +375,7 @@ Saves game state as gzipped EDN. Since entities don't carry `:act` functions (be
  :world {:maps {:level-1 <game-map> ...}
          :current-map-id :level-1
          :transitions {[:level-1 22 7] {:target-map :level-2 :target-pos [5 18]} ...}}
+ :next-entity-id 42          ;; entity id counter
  :explored {:level-1 #{[x y] ...} :level-2 #{...}}  ;; per-map explored
  :viewport {...}}
 ```

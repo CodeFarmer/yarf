@@ -923,17 +923,30 @@
 ;; Save/Load
 
 (defn prepare-save-data
-  "Prepares game state for saving. Adds version.
+  "Prepares game state for saving. Adds version and entity id counter.
    save-state is a map of additional keys to include (e.g. :explored, :viewport)."
   [game-map save-state]
-  (merge {:version 1 :game-map game-map} save-state))
+  (merge {:version 1 :game-map game-map :next-entity-id @next-id} save-state))
+
+(defn- max-entity-id
+  "Returns the maximum :id among entities, or 0 if none have integer :id."
+  [entities]
+  (reduce (fn [mx e] (if-let [id (:id e)] (if (integer? id) (max mx id) mx) mx)) 0 entities))
 
 (defn restore-save-data
-  "Restores save data. Accepts version 1 or 2. Throws on unsupported version."
+  "Restores save data. Accepts version 1 or 2. Throws on unsupported version.
+   Resets the entity id counter from :next-entity-id if present,
+   otherwise scans entities for the highest :id."
   [save-data]
   (when-not (#{1 2} (:version save-data))
     (throw (ex-info (str "Unsupported save version: " (:version save-data))
                     {:version (:version save-data)})))
+  (if-let [nid (:next-entity-id save-data)]
+    (reset! next-id nid)
+    (let [all-entities (if (= 2 (:version save-data))
+                         (mapcat #(get-entities %) (vals (get-in save-data [:world :maps])))
+                         (get-entities (:game-map save-data)))]
+      (reset! next-id (max-entity-id all-entities))))
   save-data)
 
 #?(:clj
@@ -1251,7 +1264,7 @@
   "Prepares world state for saving as version 2.
    save-state is a map of additional keys to include (e.g. :explored, :viewport)."
   [world save-state]
-  (merge {:version 2 :world world} save-state))
+  (merge {:version 2 :world world :next-entity-id @next-id} save-state))
 
 #?(:clj
 (defn save-world
