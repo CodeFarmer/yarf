@@ -468,6 +468,7 @@ Two-level dungeon demo demonstrating the framework. Uses `yarf.basics` for comba
 
 ## TODO
 
+- BLOCKED: Manual code review needed before doing more work.
 - Fix green character artifacts when Swing window is resized larger than viewport. `render-game` only writes within viewport bounds; lanterna/Swing repeats buffer content to fill extra pixel area. Need a proper fix (e.g. clearing the full terminal buffer, or handling resize events).
 - Fix FOV shadow casting artifacts near walls and in corridors — some tiles that should be visible are left unseen. Likely an issue in `compute-fov` octant scanning (e.g. wall-adjacent tiles missed at octant boundaries).
 - Extend bump actions: push objects, etc. The `:on-bump` and `:on-bump-tile` callbacks can inspect the bumped entity/tile and choose the appropriate action. Door open/close is provided by `basics/door-on-bump-tile`. Bump-without-move (Ctrl+direction) enables interactions with walkable tiles.
