@@ -10,12 +10,13 @@
 (def save-file "yarf-save.dat")
 
 (def demo-key-map
-  "Key bindings for demo: vi-style movement plus quit, Shift-S to save,
-   > to descend stairs, < to ascend stairs, f to fire ranged attack,
-   Ctrl+direction to bump without moving."
+  "Key bindings for demo: vi-style movement plus quit, . to wait,
+   Shift-S to save, > to descend stairs, < to ascend stairs,
+   f to fire ranged attack, Ctrl+direction to bump without moving."
   (merge core/default-key-map
          {\q :quit
           :escape :quit
+          \. :wait
           \S :save
           \> :descend
           \< :ascend
@@ -298,7 +299,7 @@
   (println "Look: x (move cursor, Enter to inspect, Escape to cancel)")
   (println "Fire: f (select target, Enter to fire, Escape to cancel)")
   (println "Stairs: > to descend, < to ascend")
-  (println "Save: Shift-S | Quit: q or ESC")
+  (println "Wait: . (skip turn) | Save: Shift-S | Quit: q or ESC")
   (let [registry (create-demo-registry)
         viewport (display/create-viewport 50 25)
         screen (s/get-screen :swing {:cols (:width viewport)

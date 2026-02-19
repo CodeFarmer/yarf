@@ -15,6 +15,7 @@
   (merge core/default-key-map
          {\q :quit
           :escape :quit
+          \. :wait
           \S :save
           \> :descend
           \< :ascend
